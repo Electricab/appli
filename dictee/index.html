@@ -159,12 +159,23 @@
     let recognition = null;
     let listening = false;
 
+    // Commandes vocales : "à la ligne", "retour à la ligne", "nouvelle ligne",
+    // "nouveau paragraphe" (ligne vide).
+    function applyCommands(phrase) {
+      return phrase
+        .replace(/(^|\s)nouveau paragraphe[.,!?]?(?=\s|$)/gi, '\n\n')
+        .replace(/(^|\s)(?:retour )?[àa] la ligne[.,!?]?(?=\s|$)/gi, '\n')
+        .replace(/(^|\s)nouvelle ligne[.,!?]?(?=\s|$)/gi, '\n')
+        .replace(/[ \t]*\n[ \t]*/g, '\n')
+        .replace(/\n(\S)/g, (m, c) => '\n' + c.toUpperCase());
+    }
+
     function appendText(phrase) {
-      phrase = phrase.trim();
+      phrase = applyCommands(phrase.trim());
       if (!phrase) return;
       phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
       const current = textEl.value;
-      const sep = current && !/\s$/.test(current) ? ' ' : '';
+      const sep = current && !/\s$/.test(current) && phrase[0] !== '\n' ? ' ' : '';
       textEl.value = current + sep + phrase;
       textEl.scrollTop = textEl.scrollHeight;
       save();
