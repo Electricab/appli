@@ -168,6 +168,11 @@
         .replace(/(^|\s)nouvelle ligne[.,!?]?(?=\s|$)/gi, '\n')
         // La reconnaissance française transcrit parfois "boulet point"
         .replace(/(^|\s)(?:bullet|boulet|boulette|boulets) ?points?[.,!?]?(?=\s|$)/gi, '\u0001• ')
+        .replace(/(^|\s)virgule(?=\s|$|[.,!?])/gi, ',')
+        // "point" seul, mais pas "un point", "deux points", "point de vue", "point d'…"
+        .replace(/(^|\s)(?<!(?:un|le|ce|du|au|mon|bon|à|a|deux)\s)point(?=\s|$|[.,!?])(?!\s+(?:de|du|des|d['’])(?:\s|$))/gi, '.')
+        .replace(/([.,])[.,]+/g, '$1')
+        .replace(/\. +([a-zà-ÿ])/g, (m, c) => '. ' + c.toUpperCase())
         .replace(/[ \t]*\n[ \t]*/g, '\n')
         // La puce va à la ligne, sauf si on y est déjà
         .replace(/\n?\u0001/g, '\n')
@@ -184,8 +189,11 @@
       if (!current || (/\n$/.test(current) && phrase.startsWith('\n•'))) {
         phrase = phrase.replace(/^\n/, '');
       }
-      phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
-      const sep = current && !/\s$/.test(current) && phrase[0] !== '\n' ? ' ' : '';
+      // Majuscule seulement en début de texte, de ligne, de puce ou après un point
+      if (!current.trim() || /[.!?\n•]\s*$/.test(current)) {
+        phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+      }
+      const sep = current && !/\s$/.test(current) && !/^[\n.,]/.test(phrase) ? ' ' : '';
       textEl.value = current + sep + phrase;
       textEl.scrollTop = textEl.scrollHeight;
       save();
