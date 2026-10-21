@@ -160,21 +160,31 @@
     let listening = false;
 
     // Commandes vocales : "à la ligne", "retour à la ligne", "nouvelle ligne",
-    // "nouveau paragraphe" (ligne vide).
+    // "nouveau paragraphe" (ligne vide), "bullet point" (puce).
     function applyCommands(phrase) {
       return phrase
         .replace(/(^|\s)nouveau paragraphe[.,!?]?(?=\s|$)/gi, '\n\n')
         .replace(/(^|\s)(?:retour )?[àa] la ligne[.,!?]?(?=\s|$)/gi, '\n')
         .replace(/(^|\s)nouvelle ligne[.,!?]?(?=\s|$)/gi, '\n')
+        // La reconnaissance française transcrit parfois "boulet point"
+        .replace(/(^|\s)(?:bullet|boulet|boulette|boulets) ?points?[.,!?]?(?=\s|$)/gi, '\u0001• ')
         .replace(/[ \t]*\n[ \t]*/g, '\n')
-        .replace(/\n(\S)/g, (m, c) => '\n' + c.toUpperCase());
+        // La puce va à la ligne, sauf si on y est déjà
+        .replace(/\n?\u0001/g, '\n')
+        .replace(/• +/g, '• ')
+        .replace(/• (\S)/g, (m, c) => '• ' + c.toUpperCase())
+        .replace(/\n([^\s•])/g, (m, c) => '\n' + c.toUpperCase());
     }
 
     function appendText(phrase) {
       phrase = applyCommands(phrase.trim());
       if (!phrase) return;
-      phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
       const current = textEl.value;
+      // Pas de ligne vide parasite quand une puce démarre déjà en début de ligne
+      if (!current || (/\n$/.test(current) && phrase.startsWith('\n•'))) {
+        phrase = phrase.replace(/^\n/, '');
+      }
+      phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1);
       const sep = current && !/\s$/.test(current) && phrase[0] !== '\n' ? ' ' : '';
       textEl.value = current + sep + phrase;
       textEl.scrollTop = textEl.scrollHeight;
