@@ -160,14 +160,13 @@
     let listening = false;
 
     // Commandes vocales : "à la ligne", "retour à la ligne", "nouvelle ligne",
-    // "nouveau paragraphe" (ligne vide), "bullet point" (puce).
+    // "nouveau paragraphe" (ligne vide), "puce" (liste à puces).
     function applyCommands(phrase) {
       return phrase
         .replace(/(^|\s)nouveau paragraphe[.,!?]?(?=\s|$)/gi, '\n\n')
         .replace(/(^|\s)(?:retour )?[àa] la ligne[.,!?]?(?=\s|$)/gi, '\n')
         .replace(/(^|\s)nouvelle ligne[.,!?]?(?=\s|$)/gi, '\n')
-        // La reconnaissance française transcrit parfois "boulet point"
-        .replace(/(^|\s)(?:bullet|boulet|boulette|boulets) ?points?[.,!?]?(?=\s|$)/gi, '\u0001• ')
+        .replace(/(^|\s)(?:puces?|bullet ?points?)[.,!?]?(?=\s|$)/gi, '\u0001• ')
         .replace(/(^|\s)virgule(?=\s|$|[.,!?])/gi, ',')
         // "point" seul, mais pas "un point", "deux points", "point de vue", "point d'…"
         .replace(/(^|\s)(?<!(?:un|le|ce|du|au|mon|bon|à|a|deux)\s)point(?=\s|$|[.,!?])(?!\s+(?:de|du|des|d['’])(?:\s|$))/gi, '.')

@@ -1,6 +1,6 @@
 // Met l'interface en cache pour qu'elle s'ouvre instantanément.
 // (La reconnaissance vocale elle-même nécessite une connexion internet.)
-const CACHE = 'dictee-v4';
+const CACHE = 'dictee-v5';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {
