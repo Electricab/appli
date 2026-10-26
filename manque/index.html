@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Manques</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#b45309">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1b1f24;
+      --muted: #5c6670;
+      --border: #d5dae0;
+      --accent: #b45309;
+      --accent-text: #ffffff;
+      --ok: #15803d;
+      --ok-bg: #dcfce7;
+      --warn: #b45309;
+      --warn-bg: #fef3c7;
+      --danger: #b91c1c;
+      --danger-bg: #fee2e2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1216;
+        --surface: #191d23;
+        --text: #e8eaed;
+        --muted: #9aa3ad;
+        --border: #2d333b;
+        --accent: #f59e0b;
+        --accent-text: #1b1f24;
+        --ok: #4ade80;
+        --ok-bg: #12301d;
+        --warn: #fbbf24;
+        --warn-bg: #3a2a0a;
+        --danger: #f87171;
+        --danger-bg: #3b1414;
+      }
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+      -webkit-tap-highlight-color: transparent;
+    }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    h1 { font-size: 1.25rem; margin: 0; }
+    h2 { font-size: 1rem; margin: 22px 0 8px; display: flex; align-items: center; gap: 8px; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .icon-btn {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      border-radius: 10px; width: 40px; height: 40px; font-size: 18px; cursor: pointer;
+    }
+    input, textarea {
+      font: inherit; color: inherit; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; width: 100%;
+    }
+    input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 4px; }
+    .btn {
+      font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 14px 16px; width: 100%;
+      background: var(--accent); color: var(--accent-text); cursor: pointer;
+    }
+    .btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn:disabled { opacity: 0.5; }
+
+    .banner { border-radius: 12px; padding: 10px 14px; font-size: 0.9rem; margin-bottom: 12px; }
+    .banner.warn { background: var(--warn-bg); color: var(--warn); }
+    .banner.error { background: var(--danger-bg); color: var(--danger); }
+
+    .search { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 4px 0 8px; }
+    .search input { font-size: 17px; padding: 14px 16px; }
+
+    ul.list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    ul.list li { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+    ul.list li:first-child { border-top: 0; }
+    ul.list li.tap { cursor: pointer; }
+    ul.list li.tap:active { background: var(--bg); }
+    .grow { flex: 1; min-width: 0; }
+    .title { font-weight: 600; overflow-wrap: anywhere; }
+    .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+    .badge.low { background: var(--warn-bg); color: var(--warn); }
+    .badge.empty { background: var(--danger-bg); color: var(--danger); }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.pending { background: var(--warn-bg); color: var(--warn); }
+    .count { background: var(--accent); color: var(--accent-text); border-radius: 10px; font-size: 0.75rem; padding: 1px 8px; }
+    .del { border: 0; background: none; color: var(--muted); font-size: 18px; padding: 6px 8px; cursor: pointer; }
+
+    /* Fenêtre « signaler » en bas de l'écran */
+    .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 10; }
+    .sheet {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; background: var(--surface);
+      border-radius: 18px 18px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+      max-height: 90vh; overflow: auto; box-shadow: 0 -10px 30px rgba(0,0,0,.2);
+    }
+    .sheet h3 { margin: 0 0 2px; font-size: 1.1rem; overflow-wrap: anywhere; }
+    .qty-row { display: flex; gap: 8px; align-items: center; }
+    .qty-row input { flex: 1; }
+    .qty-row .unit { color: var(--muted); min-width: 40px; }
+    .sheet .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 16px; }
+
+    .toast {
+      position: fixed; left: 16px; right: 16px; bottom: max(20px, env(safe-area-inset-bottom)); z-index: 20;
+      background: #1b1f24; color: #fff; padding: 12px 16px; border-radius: 12px; text-align: center;
+    }
+    .setup { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .setup ol { padding-left: 20px; margin: 8px 0; color: var(--muted); font-size: 0.9rem; }
+    .setup .btn { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Signaler un manque</h1>
+    <button class="icon-btn" id="btn-settings" title="Réglages" aria-label="Réglages">⚙</button>
+  </header>
+
+  <!-- ===== Réglages (première ouverture) ===== -->
+  <section id="setup" hidden>
+    <div class="setup">
+      <strong>Relier ce téléphone à votre stock</strong>
+      <ol>
+        <li>Nom du dépôt GitHub privé (le même que dans l'outil du PC).</li>
+        <li>Clé d'accès GitHub limitée à ce dépôt. Elle reste sur ce téléphone.</li>
+      </ol>
+      <form id="setup-form">
+        <label for="s-repo">Dépôt privé</label>
+        <input id="s-repo" name="repo" placeholder="Electricab/stock-donnees" autocomplete="off" autocapitalize="off" required>
+        <label for="s-token">Clé d'accès <span id="s-token-state"></span></label>
+        <input id="s-token" name="token" type="password" placeholder="github_pat_…" autocomplete="off">
+        <button class="btn" id="btn-setup">Enregistrer</button>
+        <p class="muted" id="setup-msg"></p>
+        <button type="button" class="btn secondary" id="btn-forget" hidden>Oublier la clé sur ce téléphone</button>
+        <button type="button" class="btn secondary" id="btn-setup-cancel" hidden>Fermer</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Écran principal ===== -->
+  <main id="app" hidden>
+    <div id="banner"></div>
+    <div class="search">
+      <input type="search" id="q" placeholder="Rechercher un produit…" autocomplete="off" enterkeyhint="search">
+    </div>
+    <div id="results-wrap" hidden>
+      <ul class="list" id="results"></ul>
+    </div>
+
+    <h2>À commander <span class="count" id="list-count">0</span></h2>
+    <ul class="list" id="list"></ul>
+    <p class="muted" id="list-empty">Rien à commander pour l'instant.</p>
+    <p class="muted" id="sync-info"></p>
+  </main>
+
+  <!-- ===== Fenêtre de signalement ===== -->
+  <div class="sheet-bg" id="sheet-bg" hidden></div>
+  <form class="sheet" id="sheet" hidden>
+    <h3 id="sheet-title"></h3>
+    <p class="muted" id="sheet-sub"></p>
+    <p class="banner warn" id="sheet-already" hidden></p>
+    <label for="sheet-qty">Quantité souhaitée (facultatif)</label>
+    <div class="qty-row">
+      <input id="sheet-qty" type="number" inputmode="decimal" step="any" min="0">
+      <span class="unit" id="sheet-unit"></span>
+    </div>
+    <label for="sheet-note">Note (chantier, précision…)</label>
+    <input id="sheet-note" autocomplete="off">
+    <div class="actions">
+      <button type="button" class="btn secondary" id="sheet-cancel">Annuler</button>
+      <button class="btn">Ajouter à la liste</button>
+    </div>
+  </form>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    // Page publique, données privées : le catalogue et la liste sont lus/écrits dans un dépôt GitHub
+    // privé avec la clé personnelle enregistrée sur ce téléphone. Sans clé, aucune donnée n'est visible.
+    const $ = s => document.querySelector(s);
+    const KEY = 'manque-config';
+    const CACHE_KEY = 'manque-cache';   // catalogue + liste pour fonctionner sans réseau
+    const OUTBOX_KEY = 'manque-outbox'; // signalements pas encore envoyés
+    const CATALOG_FILE = 'catalogue.json';
+    const LIST_FILE = 'a-commander.json';
+
+    const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+    const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage plein ou bloqué */ } };
+
+    let config = load(KEY, {});
+    let cache = load(CACHE_KEY, { products: [], items: [], catalog_at: null, synced_at: null });
+    let outbox = load(OUTBOX_KEY, []);
+    let selected = null;
+
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const fmtNum = n => Number(n || 0).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+    const fmtDate = iso => iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+    const LEVELS = { ok: 'OK', low: 'Bas', empty: 'Vide' };
+
+    // Identifiant unique ; crypto.randomUUID n'existe qu'en https (pas en test sur le Wi-Fi local)
+    const newId = () => crypto.randomUUID?.() ?? ([1e7] + -1e3 + -4e3 + -8e3 + -1e11)
+      .replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+    function toast(msg) {
+      const t = $('#toast');
+      t.textContent = msg; t.hidden = false;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => (t.hidden = true), 2800);
+    }
+
+    // ---------- GitHub ----------
+    const apiBase = () => load('manque-api', 'https://api.github.com'); // modifiable pour les tests
+
+    async function gh(method, path, body) {
+      const res = await fetch(`${apiBase()}/repos/${config.repo}/contents/${path}`, {
+        method, cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          Accept: 'application/vnd.github+json',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (method === 'GET' && res.status === 404) return null;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(res.status === 401 ? 'Clé refusée par GitHub (invalide ou expirée)'
+          : res.status === 404 ? 'Dépôt introuvable, ou clé sans accès à ce dépôt'
+          : res.status === 403 ? 'Accès refusé : la clé doit avoir « Contents : Read and write »'
+          : `GitHub : ${data.message || res.status}`);
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    }
+
+    // Vérifie que la clé ouvre bien le dépôt, avec le droit d'écriture
+    async function checkAccess() {
+      const res = await fetch(`${apiBase()}/repos/${config.repo}`, {
+        cache: 'no-store', headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/vnd.github+json' },
+      });
+      if (res.status === 401) throw new Error('Clé refusée par GitHub (invalide ou expirée)');
+      if (!res.ok) throw new Error('Dépôt introuvable, ou clé sans accès à ce dépôt');
+      const repo = await res.json();
+      if (repo.permissions && !repo.permissions.push) throw new Error('La clé n\'a pas le droit d\'écrire (« Contents : Read and write »)');
+    }
+
+    const b64ToText = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+    const textToB64 = s => { let bin = ''; new TextEncoder().encode(s).forEach(b => (bin += String.fromCharCode(b))); return btoa(bin); };
+
+    async function getJson(path) {
+      const d = await gh('GET', path);
+      return d ? { json: JSON.parse(b64ToText(d.content)), sha: d.sha } : { json: null, sha: undefined };
+    }
+
+    // Même règle que le PC : pour chaque article, la version modifiée le plus récemment l'emporte
+    function mergeItems(a, b) {
+      const byId = new Map();
+      for (const i of [...a, ...b]) {
+        const cur = byId.get(i.id);
+        if (!cur || String(i.updated_at) > String(cur.updated_at)) byId.set(i.id, i);
+      }
+      return [...byId.values()].sort((x, y) => String(x.created_at).localeCompare(String(y.created_at)));
+    }
+
+    // Envoie les signalements en attente (fusion avec la liste en ligne, 3 essais en cas de conflit)
+    async function pushOutbox() {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const remote = await getJson(LIST_FILE);
+        const remoteItems = remote.json?.items || [];
+        const merged = mergeItems(remoteItems, outbox);
+        try {
+          if (outbox.length) {
+            await gh('PUT', LIST_FILE, {
+              message: `Téléphone : ${outbox.length} signalement(s)`, sha: remote.sha,
+              content: textToB64(JSON.stringify({ version: 1, items: merged }, null, 1) + '\n'),
+            });
+          }
+          outbox = []; save(OUTBOX_KEY, outbox);
+          return merged;
+        } catch (e) {
+          if (e.status !== 409 && e.status !== 422) throw e;
+        }
+      }
+      throw new Error('Conflit avec le PC, nouvel essai dans un instant');
+    }
+
+    let syncing = false;
+    async function sync({ quiet = false } = {}) {
+      if (!config.repo || !config.token || syncing) return;
+      syncing = true;
+      try {
+        const [items, catalog] = await Promise.all([pushOutbox(), getJson(CATALOG_FILE)]);
+        cache = {
+          products: catalog.json?.products || [], catalog_at: catalog.json?.updated_at || null,
+          items, synced_at: new Date().toISOString(),
+        };
+        save(CACHE_KEY, cache);
+        setBanner('');
+      } catch (e) {
+        // TypeError = la requête n'a pas pu partir (pas de réseau, GitHub injoignable)
+        const offline = navigator.onLine === false || e instanceof TypeError;
+        setBanner(offline
+          ? 'Pas de connexion : vos signalements sont gardés sur le téléphone et seront envoyés dès que possible.'
+          : e.message, offline ? 'warn' : 'error');
+        if (!quiet) throw e;
+      } finally {
+        syncing = false;
+        render();
+      }
+    }
+
+    function setBanner(msg, kind = 'warn') {
+      $('#banner').innerHTML = msg ? `<div class="banner ${kind}">${esc(msg)}</div>` : '';
+    }
+
+    // ---------- Affichage ----------
+    const openItems = () => mergeItems(cache.items, outbox).filter(i => i.status === 'open').reverse();
+    const pendingIds = () => new Set(outbox.map(i => i.id));
+
+    function stockBadge(p) {
+      if (p.tracking === 'level') return `<span class="badge ${p.level}">${LEVELS[p.level] || ''}</span>`;
+      const cls = p.alert || '';
+      return `<span class="badge ${cls}">${fmtNum(p.quantity)} ${esc(p.unit)}</span>`;
+    }
+
+    function renderResults() {
+      const q = $('#q').value.trim();
+      const wrap = $('#results-wrap');
+      if (!q) { wrap.hidden = true; return; }
+      const words = norm(q).split(/\s+/).filter(Boolean);
+      const found = cache.products
+        .filter(p => { const h = norm([p.ref, p.name, p.supplier, p.category].join(' ')); return words.every(w => h.includes(w)); })
+        .slice(0, 30);
+      const inList = new Set(openItems().map(i => i.product_id));
+      $('#results').innerHTML = found.map(p => `
+        <li class="tap" data-id="${p.id}">
+          <div class="grow"><div class="title">${esc(p.name)}</div>
+            <div class="muted">${esc(p.ref)}${p.supplier ? ' · ' + esc(p.supplier) : ''}${inList.has(p.id) ? ' · <strong>déjà dans la liste</strong>' : ''}</div></div>
+          ${stockBadge(p)}
+        </li>`).join('') + `
+        <li class="tap" data-free="1">
+          <div class="grow"><div class="title">＋ « ${esc(q)} »</div>
+            <div class="muted">Article qui n'est pas dans le stock</div></div>
+        </li>`;
+      wrap.hidden = false;
+    }
+
+    function renderList() {
+      const items = openItems(), pending = pendingIds();
+      $('#list').innerHTML = items.map(i => `
+        <li data-id="${esc(i.id)}">
+          <div class="grow">
+            <div class="title">${esc(i.name)}${i.quantity ? ` <span class="muted">× ${fmtNum(i.quantity)} ${esc(i.unit)}</span>` : ''}</div>
+            <div class="muted">${i.source === 'phone' ? '📱' : '💻'} ${fmtDate(i.created_at)}${i.note ? ' · ' + esc(i.note) : ''}</div>
+          </div>
+          ${pending.has(i.id) ? '<span class="badge pending">en attente</span>' : ''}
+          <button class="del" data-del="${esc(i.id)}" aria-label="Retirer">✕</button>
+        </li>`).join('');
+      $('#list-count').textContent = items.length;
+      $('#list-empty').hidden = items.length > 0;
+      $('#list').hidden = !items.length;
+      $('#sync-info').textContent = [
+        cache.synced_at ? `Mis à jour à ${new Date(cache.synced_at).toLocaleTimeString('fr-FR', { timeStyle: 'short' })}` : '',
+        cache.catalog_at ? `stock du PC au ${fmtDate(cache.catalog_at)}` : 'catalogue pas encore envoyé par le PC',
+        outbox.length ? `${outbox.length} signalement(s) en attente d'envoi` : '',
+      ].filter(Boolean).join(' · ');
+    }
+
+    function render() {
+      const ready = !!(config.repo && config.token);
+      $('#app').hidden = !ready || !$('#setup').hidden;
+      if (!ready) showSetup(false);
+      renderResults();
+      renderList();
+    }
+
+    // ---------- Réglages ----------
+    function showSetup(cancellable) {
+      $('#setup').hidden = false;
+      $('#app').hidden = true;
+      $('#s-repo').value = config.repo || '';
+      $('#s-token').value = '';
+      $('#s-token-state').textContent = config.token ? '(enregistrée — laisser vide pour la garder)' : '';
+      $('#s-token').required = !config.token;
+      $('#btn-forget').hidden = !config.token;
+      $('#btn-setup-cancel').hidden = !cancellable;
+      $('#setup-msg').textContent = '';
+    }
+
+    $('#btn-settings').addEventListener('click', () => showSetup(!!(config.repo && config.token)));
+    $('#btn-setup-cancel').addEventListener('click', () => { $('#setup').hidden = true; render(); });
+
+    $('#setup-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const repo = $('#s-repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
+      const token = $('#s-token').value.trim() || config.token;
+      const previous = config;
+      config = { repo, token };
+      $('#setup-msg').textContent = 'Connexion à GitHub…';
+      $('#btn-setup').disabled = true;
+      try {
+        await checkAccess();
+        save(KEY, config);
+        $('#setup').hidden = true;
+        toast('Téléphone relié au stock');
+        await sync({ quiet: true });
+      } catch (err) {
+        config = previous;
+        $('#setup-msg').textContent = err.message;
+      } finally {
+        $('#btn-setup').disabled = false;
+      }
+    });
+
+    $('#btn-forget').addEventListener('click', () => {
+      if (!confirm('Oublier la clé sur ce téléphone ? Il faudra la saisir à nouveau.')) return;
+      config = { repo: config.repo };
+      save(KEY, config);
+      showSetup(false);
+    });
+
+    // ---------- Signalement ----------
+    function openSheet(product, freeName) {
+      selected = product ? { product } : { name: freeName };
+      $('#sheet-title').textContent = product ? product.name : freeName;
+      $('#sheet-sub').textContent = product
+        ? [product.ref, product.supplier, product.pack_size > 0 ? `vendu par ${fmtNum(product.pack_size)} ${product.unit}` : '',
+           product.tracking === 'level' ? `niveau : ${LEVELS[product.level]}` : `stock : ${fmtNum(product.quantity)} ${product.unit}`]
+          .filter(Boolean).join(' · ')
+        : 'Article qui n\'est pas dans le stock';
+      const already = product && openItems().find(i => i.product_id === product.id);
+      $('#sheet-already').hidden = !already;
+      if (already) $('#sheet-already').textContent = `Déjà dans la liste depuis le ${fmtDate(already.created_at)}${already.quantity ? ` (× ${fmtNum(already.quantity)})` : ''}.`;
+      $('#sheet-qty').value = '';
+      $('#sheet-unit').textContent = product?.unit || '';
+      $('#sheet-note').value = load('manque-last-note', '');
+      $('#sheet-bg').hidden = $('#sheet').hidden = false;
+      $('#sheet-qty').focus();
+    }
+
+    function closeSheet() { $('#sheet-bg').hidden = $('#sheet').hidden = true; selected = null; }
+    $('#sheet-bg').addEventListener('click', closeSheet);
+    $('#sheet-cancel').addEventListener('click', closeSheet);
+
+    $('#sheet').addEventListener('submit', async e => {
+      e.preventDefault();
+      const p = selected.product, now = new Date().toISOString();
+      const q = Number($('#sheet-qty').value);
+      const note = $('#sheet-note').value.trim();
+      save('manque-last-note', note); // la note du chantier est reproposée pour le signalement suivant
+      outbox.push({
+        id: newId(), product_id: p ? p.id : null, ref: p ? p.ref : '', name: p ? p.name : selected.name,
+        quantity: q > 0 ? q : null, unit: p ? p.unit : '', note, source: 'phone', status: 'open',
+        created_at: now, updated_at: now, ordered_at: null,
+      });
+      save(OUTBOX_KEY, outbox);
+      closeSheet();
+      $('#q').value = '';
+      render();
+      try { await sync(); toast('Ajouté à la liste À commander'); }
+      catch { toast('Enregistré sur le téléphone, envoi dès que possible'); }
+    });
+
+    $('#results').addEventListener('click', e => {
+      const li = e.target.closest('li');
+      if (!li) return;
+      if (li.dataset.free) openSheet(null, $('#q').value.trim());
+      else openSheet(cache.products.find(p => String(p.id) === li.dataset.id));
+    });
+
+    // Retirer un article signalé par erreur
+    $('#list').addEventListener('click', async e => {
+      const id = e.target.dataset.del;
+      if (!id) return;
+      const item = openItems().find(i => i.id === id);
+      if (!item || !confirm(`Retirer « ${item.name} » de la liste ?`)) return;
+      outbox = outbox.filter(i => i.id !== id);
+      outbox.push({ ...item, status: 'deleted', updated_at: new Date().toISOString() });
+      save(OUTBOX_KEY, outbox);
+      render();
+      try { await sync(); } catch { toast('Retrait enregistré, envoi dès que possible'); }
+    });
+
+    $('#q').addEventListener('input', renderResults);
+
+    // ---------- Démarrage ----------
+    render();
+    if (config.repo && config.token) sync({ quiet: true });
+    window.addEventListener('online', () => sync({ quiet: true }));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync({ quiet: true }); });
+    setInterval(() => { if (!document.hidden) sync({ quiet: true }); }, 60 * 1000);
+
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  </script>
+</body>
+</html>
