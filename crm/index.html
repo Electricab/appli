@@ -283,6 +283,7 @@
           <button class="tool" data-size aria-label="Épaisseur" id="tool-size">✎</button>
           <button class="tool" data-tool="hl" aria-label="Surligneur"><span class="dot" style="background:#facc15;border-radius:3px"></span></button>
           <button class="tool" data-tool="eraser" aria-label="Gomme">⌫</button>
+          <button class="tool" id="tool-select" aria-label="Sélectionner pour déplacer">⬚</button>
           <button class="tool" id="tool-undo" aria-label="Annuler">↶</button>
           <button class="tool" id="tool-redo" aria-label="Rétablir">↷</button>
           <button class="tool" id="tool-finger" aria-label="Écrire au doigt">☝</button>
@@ -777,7 +778,105 @@
       ctx.setTransform(note.dpr, 0, 0, note.dpr, 0, -note.top * note.dpr);
       const visible = { ...note.doc, strokes: note.doc.strokes.filter(s => s.y1 >= top && s.y0 <= bottom) };
       Ink.drawPage(ctx, visible, k);
+      drawSelection();
     }
+
+    // ---------- Sélection (rectangle ou lasso) pour déplacer une zone ----------
+    // note.sel = { strokes, box: [x0, y0, x1, y1] } ; selGesture = tracé de la zone ou déplacement en cours
+    let selGesture = null;
+    note.selMode = load('crm-select-mode', 'rect');
+
+    function drawSelection() {
+      const k = note.k;
+      ctx.save();
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = '#0f766e';
+      if (selGesture?.kind === 'region') {
+        const p = selGesture.pts;
+        ctx.fillStyle = 'rgba(15,118,110,.06)';
+        ctx.beginPath();
+        if (note.selMode === 'rect') ctx.rect(p[0] * k, p[1] * k, (p[p.length - 2] - p[0]) * k, (p[p.length - 1] - p[1]) * k);
+        else { ctx.moveTo(p[0] * k, p[1] * k); for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * k, p[i + 1] * k); ctx.closePath(); }
+        ctx.fill(); ctx.stroke();
+      }
+      if (note.sel) {
+        const [x0, y0, x1, y1] = note.sel.box;
+        ctx.fillStyle = 'rgba(15,118,110,.08)';
+        ctx.fillRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+        ctx.strokeRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+        // poignée centrale : « faire glisser pour déplacer »
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#0f766e';
+        ctx.beginPath(); ctx.arc((x0 + x1) / 2 * k, (y0 + y1) / 2 * k, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✥', (x0 + x1) / 2 * k, (y0 + y1) / 2 * k + 1);
+      }
+      ctx.restore();
+    }
+
+    function insidePolygon(x, y, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 2; i < poly.length; j = i, i += 2) {
+        const xi = poly[i], yi = poly[i + 1], xj = poly[j], yj = poly[j + 1];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+
+    const selBox = strokes => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of strokes) for (let i = 0; i < s.pts.length; i += 3) {
+        x0 = Math.min(x0, s.pts[i]); x1 = Math.max(x1, s.pts[i]); y0 = Math.min(y0, s.pts[i + 1]); y1 = Math.max(y1, s.pts[i + 1]);
+      }
+      const pad = 14;
+      return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+    };
+
+    // Un trait est sélectionné quand au moins la moitié de ses points est dans la zone
+    function finishRegion() {
+      let poly = selGesture.pts;
+      if (note.selMode === 'rect') {
+        const [ax, ay] = poly, bx = poly[poly.length - 2], by = poly[poly.length - 1];
+        poly = [ax, ay, bx, ay, bx, by, ax, by];
+      }
+      const strokes = poly.length >= 6 ? note.doc.strokes.filter(s => {
+        let n = 0;
+        for (let i = 0; i < s.pts.length; i += 3) if (insidePolygon(s.pts[i], s.pts[i + 1], poly)) n++;
+        return n * 2 >= s.pts.length / 3;
+      }) : [];
+      note.sel = strokes.length ? { strokes, box: selBox(strokes) } : null;
+    }
+
+    // Pendant le glissé, les positions restent exactes ; elles sont arrondies au lâcher (fichier plus léger)
+    function moveStrokes(strokes, dx, dy, round = true) {
+      for (const s of strokes) {
+        for (let i = 0; i < s.pts.length; i += 3) {
+          s.pts[i] += dx; s.pts[i + 1] += dy;
+          if (round) { s.pts[i] = Math.round(s.pts[i]); s.pts[i + 1] = Math.round(s.pts[i + 1]); }
+        }
+        bbox(s);
+      }
+    }
+
+    function clearSelection() {
+      if (!note.sel && !selGesture) return;
+      note.sel = null; selGesture = null;
+      redraw();
+    }
+
+    $('#tool-select').addEventListener('click', () => {
+      // Deuxième appui : rectangle ⇄ lasso
+      if (note.tool === 'select') {
+        note.selMode = note.selMode === 'rect' ? 'lasso' : 'rect';
+        save('crm-select-mode', note.selMode);
+        clearSelection();
+      }
+      note.tool = 'select';
+      renderTools();
+      toast(note.selMode === 'rect' ? 'Sélection rectangle : entourez la zone, puis faites-la glisser (réappuyez pour le lasso)'
+        : 'Sélection au lasso : entourez la zone, puis faites-la glisser (réappuyez pour le rectangle)');
+    });
     window.addEventListener('scroll', () => { if (state.screen === 'note') requestAnimationFrame(redraw); }, { passive: true });
     window.addEventListener('resize', () => { if (state.screen === 'note') layoutNote(); });
 
@@ -791,6 +890,9 @@
     function renderTools() {
       $$('[data-pen]').forEach(b => b.classList.toggle('active', note.tool === 'pen' && b.dataset.pen === note.color));
       $$('[data-tool]').forEach(b => b.classList.toggle('active', note.tool === b.dataset.tool));
+      $('#tool-select').classList.toggle('active', note.tool === 'select');
+      $('#tool-select').textContent = note.selMode === 'lasso' ? '➰' : '⬚';
+      if (note.tool !== 'select') clearSelection();
       $('#tool-size').innerHTML = `<span class="dot" style="width:${6 + note.size * 5}px;height:${6 + note.size * 5}px;background:currentColor"></span>`;
       $('#tool-finger').classList.toggle('active', note.finger);
       $('#tool-undo').disabled = !note.undo.length;
@@ -806,6 +908,12 @@
     });
 
     function applyOp(op, reverse) {
+      clearSelection();
+      if (op.type === 'move') {
+        moveStrokes(op.strokes, reverse ? -op.dx : op.dx, reverse ? -op.dy : op.dy);
+        changed(); redraw();
+        return;
+      }
       const add = op.type === 'add' ? !reverse : reverse;
       if (add) op.strokes.forEach(({ s, i }) => note.doc.strokes.splice(Math.min(i, note.doc.strokes.length), 0, s));
       else op.strokes.forEach(({ s }) => { const i = note.doc.strokes.indexOf(s); if (i >= 0) note.doc.strokes.splice(i, 1); });
@@ -841,6 +949,17 @@
       const [x, y] = toPage(e);
       $('#note-tip').textContent = '';
       if (note.tool === 'eraser') { erasing = { pointer: e.pointerId, removed: [] }; eraseAt(x, y); return; }
+      if (note.tool === 'select') {
+        const b = note.sel?.box, m = 10;
+        if (b && x >= b[0] - m && x <= b[2] + m && y >= b[1] - m && y <= b[3] + m) {
+          selGesture = { pointer: e.pointerId, kind: 'move', x, y, dx: 0, dy: 0 };
+        } else {
+          note.sel = null;
+          selGesture = { pointer: e.pointerId, kind: 'region', pts: [Math.round(x), Math.round(y)] };
+        }
+        redraw();
+        return;
+      }
       const hl = note.tool === 'hl';
       current = { pointer: e.pointerId, s: { c: hl ? '#facc15' : note.color, s: hl ? 22 : SIZES[note.size], a: hl ? 0.35 : 1, pts: [Math.round(x), Math.round(y), pressure(e)] } };
       note.doc.strokes.push(current.s);
@@ -849,7 +968,8 @@
     });
 
     canvas.addEventListener('pointermove', e => {
-      if (e.pointerType === 'touch' && touches.has(e.pointerId) && !(current?.pointer === e.pointerId) && !(erasing?.pointer === e.pointerId)) {
+      if (e.pointerType === 'touch' && touches.has(e.pointerId) && !(current?.pointer === e.pointerId) && !(erasing?.pointer === e.pointerId)
+        && !(selGesture?.pointer === e.pointerId)) {
         // Défilement manuel (le canvas bloque le défilement natif pour que le stylet écrive)
         const t = touches.get(e.pointerId);
         const dy = e.clientY - t.y, dt = Math.max(1, e.timeStamp - t.t);
@@ -858,6 +978,23 @@
         return;
       }
       if (erasing?.pointer === e.pointerId) { const [x, y] = toPage(e); eraseAt(x, y); return; }
+      if (selGesture?.pointer === e.pointerId) {
+        const [x, y] = toPage(e);
+        if (selGesture.kind === 'region') {
+          const p = selGesture.pts;
+          if (note.selMode === 'rect') p.splice(2, 2, Math.round(x), Math.round(y));
+          else if (Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) >= 4) p.push(Math.round(x), Math.round(y));
+        } else {
+          // La zone suit le stylet ; la page s'allonge si on la descend
+          const dx = x - selGesture.x, dy = y - selGesture.y;
+          moveStrokes(note.sel.strokes, dx, dy, false);
+          note.sel.box = note.sel.box.map((v, i) => v + (i % 2 ? dy : dx));
+          selGesture.dx += dx; selGesture.dy += dy; selGesture.x = x; selGesture.y = y;
+          grow(note.sel.box[3]);
+        }
+        redraw();
+        return;
+      }
       if (current?.pointer !== e.pointerId) return;
       const s = current.s, coalesced = e.getCoalescedEvents?.(), events = coalesced?.length ? coalesced : [e];
       const from = Math.max(0, s.pts.length / 3 - 2);
@@ -885,6 +1022,17 @@
         let v = t.v * 16;
         const step = () => { window.scrollBy(0, -v); v *= 0.94; if (Math.abs(v) > 0.5) fling = requestAnimationFrame(step); };
         fling = requestAnimationFrame(step);
+      }
+      if (selGesture?.pointer === e.pointerId) {
+        if (selGesture.kind === 'region') finishRegion();
+        else if (Math.abs(selGesture.dx) + Math.abs(selGesture.dy) > 0.5) {
+          moveStrokes(note.sel.strokes, 0, 0);
+          note.undo.push({ type: 'move', strokes: note.sel.strokes, dx: selGesture.dx, dy: selGesture.dy });
+          note.redo = [];
+          changed();
+        }
+        selGesture = null;
+        redraw(); renderTools();
       }
       if (erasing?.pointer === e.pointerId) {
         if (erasing.removed.length) { note.undo.push({ type: 'remove', strokes: erasing.removed }); note.redo = []; changed(); }
