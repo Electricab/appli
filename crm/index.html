@@ -145,7 +145,15 @@
     #ink { position: sticky; display: block; touch-action: none; width: 100%; }
     #note-tip { position: absolute; left: 0; right: 0; top: 24px; text-align: center; color: #94a3b8; font-size: 0.9rem; pointer-events: none; padding: 0 20px; }
 
-    .html-doc { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+    .done-toggle {
+      display: inline-flex; align-items: center; gap: 6px; margin: 0; flex: none; font-size: 0.85rem; font-weight: 600; color: var(--text);
+      border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; height: 40px; background: var(--surface);
+    }
+    .done-toggle input { width: 20px; height: 20px; margin: 0; padding: 0; accent-color: var(--ok); }
+    .done-toggle:has(input:checked) { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+    .done-toggle.big { margin-bottom: 12px; }
+    ul.list li.done .title { color: var(--muted); }
+    .html-doc {background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
     .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
 
     .toast {
@@ -264,8 +272,7 @@
         <button class="icon-btn" id="note-back" aria-label="Retour">←</button>
         <label class="lbl" for="note-date" style="margin:0">Visite du</label>
         <input type="date" id="note-date">
-        <button class="tool" id="tool-finger" aria-label="Écrire au doigt" style="width:40px;flex:none">☝</button>
-        <button class="tool" id="tool-delete" aria-label="Supprimer la visite" style="width:40px;flex:none">🗑</button>
+        <label class="done-toggle"><input type="checkbox" id="note-done"> Traitée</label>
       </div>
       <div class="note-row">
         <div class="tools" id="tools">
@@ -278,6 +285,8 @@
           <button class="tool" data-tool="eraser" aria-label="Gomme">⌫</button>
           <button class="tool" id="tool-undo" aria-label="Annuler">↶</button>
           <button class="tool" id="tool-redo" aria-label="Rétablir">↷</button>
+          <button class="tool" id="tool-finger" aria-label="Écrire au doigt">☝</button>
+          <button class="tool" id="tool-delete" aria-label="Supprimer la visite">🗑</button>
         </div>
       </div>
     </div>
@@ -294,6 +303,7 @@
       <button class="icon-btn" data-back aria-label="Retour">←</button>
       <h1 id="v-title"></h1>
     </header>
+    <label class="done-toggle big"><input type="checkbox" id="v-done"> Visite traitée</label>
     <div class="html-doc" id="v-body"></div>
     <p class="muted">Document créé sur le PC : il se modifie dans le CRM du PC.</p>
   </section>
@@ -601,10 +611,10 @@
         </div>`;
       const docs = clientDocs(c.id);
       $('#docs').innerHTML = docs.map(doc => `
-        <li class="tap" data-id="${esc(doc.id)}">
+        <li class="tap${doc.done ? ' done' : ''}" data-id="${esc(doc.id)}">
           <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
           <div class="grow">
-            <div class="title">Visite du ${esc(fmtDay(doc.visit_date))}</div>
+            <div class="title">Visite du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
             <div class="muted">${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
@@ -622,7 +632,7 @@
     });
     $('#btn-visit').addEventListener('click', async () => {
       const now = nowIso();
-      const meta = { id: newId(), client_id: state.clientId, kind: 'visite', format: 'ink', visit_date: today(),
+      const meta = { id: newId(), client_id: state.clientId, kind: 'visite', format: 'ink', visit_date: today(), done: 0,
         source: 'phone', deleted: 0, created_at: now, updated_at: now };
       // La visite n'entre dans la liste qu'au premier trait (pas de document vide si on ressort aussitôt)
       await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: 0, strokes: [] }) });
@@ -730,6 +740,7 @@
       note.doc.strokes.forEach(bbox);
       note.undo = []; note.redo = []; note.dirty = false;
       $('#note-date').value = meta.visit_date;
+      $('#note-done').checked = !!meta.done;
       $('#note-state').textContent = '';
       show('note', { docId: id });
       layoutNote();
@@ -911,7 +922,7 @@
       if (!note.meta || !note.dirty) return;
       note.dirty = false;
       const now = nowIso();
-      const meta = { ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date, updated_at: now };
+      const meta = { ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date, done: $('#note-done').checked ? 1 : 0, updated_at: now };
       const strokes = note.doc.strokes.map(({ c, s, a, pts }) => ({ c, s, a, pts }));
       await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: note.doc.h, strokes }) });
       cache.docs = cache.docs.filter(d => d.id !== meta.id).concat(meta);
@@ -923,6 +934,7 @@
     }, 800);
 
     $('#note-date').addEventListener('change', () => { if (!$('#note-date').value) $('#note-date').value = note.meta.visit_date; changed(); });
+    $('#note-done').addEventListener('change', () => { changed(); toast($('#note-done').checked ? 'Visite marquée comme traitée' : 'Visite à traiter'); });
     $('#note-back').addEventListener('click', () => history.back());
 
     async function leaveNote() {
@@ -977,8 +989,20 @@
       if (!rec) { toast('Document pas encore disponible sur ce téléphone (connexion nécessaire)'); return; }
       $('#v-title').textContent = `Visite du ${fmtDay(meta.visit_date)}`;
       $('#v-body').innerHTML = sanitizeHtml(rec.body) || '<p class="muted">Document vide.</p>';
+      $('#v-done').checked = !!meta.done;
       show('view', { docId: meta.id });
     }
+
+    // Case « traitée » d'un document du PC : le contenu est déjà sur le téléphone, il repart avec
+    $('#v-done').addEventListener('change', async e => {
+      const now = nowIso(), id = state.docId;
+      const rec = await idb.get(id);
+      if (rec) await idb.put({ ...rec, updated_at: now });
+      cache.docs = cache.docs.map(d => d.id === id ? { ...d, done: e.target.checked ? 1 : 0, updated_at: now } : d);
+      save(CACHE_KEY, cache);
+      syncSoon(500);
+      toast(e.target.checked ? 'Visite marquée comme traitée' : 'Visite à traiter');
+    });
 
     // ---------- Réglages ----------
     function showSetup(cancellable) {
