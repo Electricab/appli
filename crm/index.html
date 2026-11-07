@@ -153,6 +153,21 @@
     .done-toggle:has(input:checked) { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
     .done-toggle.big { margin-bottom: 12px; }
     ul.list li.done .title { color: var(--muted); }
+    .type-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; flex: 1; min-width: 0; }
+    .type-seg button { font: inherit; font-size: 0.8rem; height: 40px; padding: 0 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .type-seg button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+    .type-seg.big { margin-bottom: 12px; }
+    .tool.wide { width: 40px; flex: none; }
+    .tool.sel-del { background: var(--danger-bg); border-color: var(--danger); }
+    .photo-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 10; }
+    .photo-menu {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; background: var(--surface); display: grid; gap: 10px;
+      border-radius: 18px 18px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+    }
+    .photo-menu label { margin: 0; font-size: 1rem; }
+    .photo-menu label.btn { color: var(--accent-text); }
+    .photo-menu label.btn.secondary { color: var(--text); }
+    .html-doc img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
     .html-doc {background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
     .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
 
@@ -275,6 +290,15 @@
         <label class="done-toggle"><input type="checkbox" id="note-done"> Traitée</label>
       </div>
       <div class="note-row">
+        <div class="type-seg" id="note-type">
+          <button type="button" data-v="pre_devis">Visite pré-devis</button>
+          <button type="button" data-v="realisation">Réalisation</button>
+        </div>
+        <button class="tool wide" id="tool-photo" aria-label="Ajouter une photo">📷</button>
+        <button class="tool wide" id="tool-finger" aria-label="Écrire au doigt">☝</button>
+        <button class="tool wide" id="tool-delete" aria-label="Supprimer">🗑</button>
+      </div>
+      <div class="note-row">
         <div class="tools" id="tools">
           <button class="tool" data-pen="#1b1f24" aria-label="Stylo noir"><span class="dot" style="background:#1b1f24"></span></button>
           <button class="tool" data-pen="#1d4ed8" aria-label="Stylo bleu"><span class="dot" style="background:#1d4ed8"></span></button>
@@ -286,8 +310,6 @@
           <button class="tool" id="tool-select" aria-label="Sélectionner pour déplacer">⬚</button>
           <button class="tool" id="tool-undo" aria-label="Annuler">↶</button>
           <button class="tool" id="tool-redo" aria-label="Rétablir">↷</button>
-          <button class="tool" id="tool-finger" aria-label="Écrire au doigt">☝</button>
-          <button class="tool" id="tool-delete" aria-label="Supprimer la visite">🗑</button>
         </div>
       </div>
     </div>
@@ -304,10 +326,22 @@
       <button class="icon-btn" data-back aria-label="Retour">←</button>
       <h1 id="v-title"></h1>
     </header>
+    <div class="type-seg big" id="v-type">
+      <button type="button" data-v="pre_devis">Visite pré-devis</button>
+      <button type="button" data-v="realisation">Réalisation</button>
+    </div>
     <label class="done-toggle big"><input type="checkbox" id="v-done"> Visite traitée</label>
     <div class="html-doc" id="v-body"></div>
     <p class="muted">Document créé sur le PC : il se modifie dans le CRM du PC.</p>
   </section>
+
+  <!-- ===== Ajout d'une photo ===== -->
+  <div class="photo-bg" id="photo-bg" hidden></div>
+  <div class="photo-menu" id="photo-menu" hidden>
+    <label class="btn"><input type="file" id="photo-camera" accept="image/*" capture="environment" hidden>📸 Prendre une photo</label>
+    <label class="btn secondary"><input type="file" id="photo-pick" accept="image/*" hidden>🖼️ Choisir une photo existante</label>
+    <button type="button" class="btn secondary" id="photo-cancel">Annuler</button>
+  </div>
 
   <div class="toast" id="toast" hidden></div>
 
@@ -338,6 +372,9 @@
     const codeFromName = nom => String(nom ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
       .toUpperCase().replace(/Œ/g, 'OE').replace(/Æ/g, 'AE').replace(/[^A-Z0-9]/g, '').slice(0, 8);
     const CATEGORIES = { prospect: 'Prospect', client: 'Client' };
+    const VISIT_TYPES = { pre_devis: 'Visite pré-devis', realisation: 'Réalisation' };
+    const visitLabel = d => VISIT_TYPES[d.visit_type] || VISIT_TYPES.pre_devis;
+    const renderTypeSeg = (el, type) => el.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === (type || 'pre_devis')));
     const PAYS = [['FR', 'France'], ['BE', 'Belgique'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['MC', 'Monaco'],
       ['DE', 'Allemagne'], ['ES', 'Espagne'], ['IT', 'Italie'], ['NL', 'Pays-Bas'], ['PT', 'Portugal'], ['GB', 'Royaume-Uni']];
 
@@ -356,15 +393,17 @@
     const idb = (() => {
       let dbp;
       const open = () => dbp ??= new Promise((ok, ko) => {
-        const r = indexedDB.open('crm', 1);
-        r.onupgradeneeded = () => r.result.createObjectStore('bodies', { keyPath: 'id' });
+        const r = indexedDB.open('crm', 2);
+        r.onupgradeneeded = () => {
+          for (const name of ['bodies', 'photos']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name, { keyPath: 'id' });
+        };
         r.onsuccess = () => ok(r.result);
         r.onerror = () => ko(r.error);
       });
-      const tx = async (mode, fn) => {
+      const tx = async (mode, fn, store = 'bodies') => {
         const db = await open();
         return new Promise((ok, ko) => {
-          const t = db.transaction('bodies', mode), req = fn(t.objectStore('bodies'));
+          const t = db.transaction(store, mode), req = fn(t.objectStore(store));
           t.oncomplete = () => ok(req?.result);
           t.onerror = () => ko(t.error);
         });
@@ -372,6 +411,8 @@
       return {
         get: id => tx('readonly', s => s.get(id)),
         put: rec => tx('readwrite', s => s.put(rec)),
+        getPhoto: id => tx('readonly', s => s.get(id), 'photos'),
+        putPhoto: rec => tx('readwrite', s => s.put(rec), 'photos'),
       };
     })();
 
@@ -470,6 +511,31 @@
       });
     }
 
+    // Photos : gardées sur le téléphone, envoyées une seule fois, avant la note qui les cite
+    const PHOTO_OUTBOX = 'crm-photo-outbox';
+    async function pushPhotos() {
+      for (const id of load(PHOTO_OUTBOX, [])) {
+        const rec = await idb.getPhoto(id);
+        try {
+          if (rec) await gh('PUT', path(`photos/${id}.jpg`), { message: 'Téléphone : photo', content: rec.data });
+        } catch (e) {
+          if (e.status !== 422) throw e; // 422 : déjà dans le dépôt (envoi précédent interrompu)
+        }
+        save(PHOTO_OUTBOX, load(PHOTO_OUTBOX, []).filter(x => x !== id));
+      }
+    }
+
+    // Base64 de la photo : sur le téléphone, sinon téléchargée une fois
+    async function photoData(id) {
+      const rec = await idb.getPhoto(id);
+      if (rec) return rec.data;
+      const file = await gh('GET', path(`photos/${id}.jpg`));
+      if (!file?.content) return null;
+      const data = file.content.replace(/\s/g, '');
+      await idb.putPhoto({ id, data });
+      return data;
+    }
+
     const syncDocs = () => withRetry(async () => {
       const remote = await getJson(path('documents.json'));
       const remoteMetas = remote.json?.documents || [];
@@ -492,6 +558,7 @@
         try {
           await saveNote.flush?.();
           await syncClients();
+          await pushPhotos();
           await syncDocs();
           cache.synced_at = nowIso(); save(CACHE_KEY, cache);
           setBanner('');
@@ -615,7 +682,7 @@
         <li class="tap${doc.done ? ' done' : ''}" data-id="${esc(doc.id)}">
           <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
           <div class="grow">
-            <div class="title">Visite du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
+            <div class="title">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
             <div class="muted">${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
@@ -633,7 +700,7 @@
     });
     $('#btn-visit').addEventListener('click', async () => {
       const now = nowIso();
-      const meta = { id: newId(), client_id: state.clientId, kind: 'visite', format: 'ink', visit_date: today(), done: 0,
+      const meta = { id: newId(), client_id: state.clientId, kind: 'visite', format: 'ink', visit_date: today(), visit_type: 'pre_devis', done: 0,
         source: 'phone', deleted: 0, created_at: now, updated_at: now };
       // La visite n'entre dans la liste qu'au premier trait (pas de document vide si on ressort aussitôt)
       await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: 0, strokes: [] }) });
@@ -742,10 +809,28 @@
       note.undo = []; note.redo = []; note.dirty = false;
       $('#note-date').value = meta.visit_date;
       $('#note-done').checked = !!meta.done;
+      renderTypeSeg($('#note-type'), meta.visit_type);
+      note.sel = null;
       $('#note-state').textContent = '';
       show('note', { docId: id });
       layoutNote();
       renderTools();
+    }
+
+    const usedBottom = () => Math.max(note.doc.strokes.reduce((m, s) => Math.max(m, s.y1 || 0), 0), ...note.doc.images.map(i => i.y + i.h), 0);
+
+    // Image affichée dans la note : chargée à la demande, la page est redessinée quand elle arrive
+    const noteImages = new Map();
+    function noteImage(id) {
+      if (noteImages.has(id)) return noteImages.get(id);
+      const img = new Image();
+      noteImages.set(id, img);
+      img.onload = () => redraw();
+      photoData(id).then(data => {
+        if (data) img.src = `data:image/jpeg;base64,${data}`;
+        else noteImages.delete(id);
+      }).catch(() => noteImages.delete(id)); // hors connexion : nouvel essai au prochain affichage
+      return img;
     }
 
     function layoutNote() {
@@ -759,7 +844,7 @@
       canvas.width = Math.round(cssW * note.dpr);
       canvas.height = Math.round(note.viewH * note.dpr);
       // La page fait au moins 1,5 écran et garde toujours de la place sous la dernière ligne écrite
-      const used = note.doc.strokes.reduce((m, s) => Math.max(m, s.y1 || 0), 0);
+      const used = usedBottom();
       note.doc.h = Math.max(note.doc.h || 0, used + 900, (note.viewH / note.k) * 1.5);
       pageEl.style.height = `${note.doc.h * note.k}px`;
       $('#note-tip').textContent = note.doc.strokes.length ? '' : note.finger
@@ -776,8 +861,12 @@
       note.top = pageOffset();
       const k = note.k, top = note.top / k, bottom = top + note.viewH / k;
       ctx.setTransform(note.dpr, 0, 0, note.dpr, 0, -note.top * note.dpr);
-      const visible = { ...note.doc, strokes: note.doc.strokes.filter(s => s.y1 >= top && s.y0 <= bottom) };
-      Ink.drawPage(ctx, visible, k);
+      const visible = {
+        ...note.doc,
+        strokes: note.doc.strokes.filter(s => s.y1 >= top && s.y0 <= bottom),
+        images: note.doc.images.filter(i => i.y + i.h >= top && i.y <= bottom),
+      };
+      Ink.drawPage(ctx, visible, k, { image: noteImage });
       drawSelection();
     }
 
@@ -824,8 +913,9 @@
       return inside;
     }
 
-    const selBox = strokes => {
+    const selBox = (strokes, images = []) => {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const i of images) { x0 = Math.min(x0, i.x); y0 = Math.min(y0, i.y); x1 = Math.max(x1, i.x + i.w); y1 = Math.max(y1, i.y + i.h); }
       for (const s of strokes) for (let i = 0; i < s.pts.length; i += 3) {
         x0 = Math.min(x0, s.pts[i]); x1 = Math.max(x1, s.pts[i]); y0 = Math.min(y0, s.pts[i + 1]); y1 = Math.max(y1, s.pts[i + 1]);
       }
@@ -836,6 +926,13 @@
     // Un trait est sélectionné quand au moins la moitié de ses points est dans la zone
     function finishRegion() {
       let poly = selGesture.pts;
+      // Simple appui sur une photo : elle est sélectionnée
+      const xs = poly.filter((_, i) => i % 2 === 0), ys = poly.filter((_, i) => i % 2);
+      if (Math.max(...xs) - Math.min(...xs) < 12 && Math.max(...ys) - Math.min(...ys) < 12) {
+        const hit = note.doc.images.findLast(i => xs[0] >= i.x && xs[0] <= i.x + i.w && ys[0] >= i.y && ys[0] <= i.y + i.h);
+        note.sel = hit ? { strokes: [], images: [hit], box: selBox([], [hit]) } : null;
+        return;
+      }
       if (note.selMode === 'rect') {
         const [ax, ay] = poly, bx = poly[poly.length - 2], by = poly[poly.length - 1];
         poly = [ax, ay, bx, ay, bx, by, ax, by];
@@ -845,11 +942,13 @@
         for (let i = 0; i < s.pts.length; i += 3) if (insidePolygon(s.pts[i], s.pts[i + 1], poly)) n++;
         return n * 2 >= s.pts.length / 3;
       }) : [];
-      note.sel = strokes.length ? { strokes, box: selBox(strokes) } : null;
+      const images = poly.length >= 6 ? note.doc.images.filter(i => insidePolygon(i.x + i.w / 2, i.y + i.h / 2, poly)) : [];
+      note.sel = strokes.length || images.length ? { strokes, images, box: selBox(strokes, images) } : null;
     }
 
     // Pendant le glissé, les positions restent exactes ; elles sont arrondies au lâcher (fichier plus léger)
-    function moveStrokes(strokes, dx, dy, round = true) {
+    function moveStrokes(strokes, dx, dy, round = true, images = []) {
+      for (const i of images) { i.x += dx; i.y += dy; }
       for (const s of strokes) {
         for (let i = 0; i < s.pts.length; i += 3) {
           s.pts[i] += dx; s.pts[i + 1] += dy;
@@ -857,6 +956,30 @@
         }
         bbox(s);
       }
+    }
+
+    const inSelection = (x, y) => {
+      const b = note.sel?.box, m = 10;
+      return !!b && x >= b[0] - m && x <= b[2] + m && y >= b[1] - m && y <= b[3] + m;
+    };
+
+    // Retire la zone sélectionnée (photo ou traits) ; « annuler » la remet
+    function removeSelection() {
+      const op = { type: 'remove', strokes: [], images: [] };
+      for (const s of note.sel.strokes) {
+        op.strokes.unshift({ s, i: note.doc.strokes.indexOf(s) });
+        note.doc.strokes.splice(note.doc.strokes.indexOf(s), 1);
+      }
+      for (const img of note.sel.images) {
+        op.images.unshift({ img, i: note.doc.images.indexOf(img) });
+        note.doc.images.splice(note.doc.images.indexOf(img), 1);
+      }
+      op.strokes.sort((a, b) => a.i - b.i);
+      op.images.sort((a, b) => a.i - b.i);
+      note.undo.push(op);
+      note.redo = [];
+      note.sel = null;
+      changed(); redraw(); renderTools();
     }
 
     function clearSelection() {
@@ -893,6 +1016,7 @@
       $('#tool-select').classList.toggle('active', note.tool === 'select');
       $('#tool-select').textContent = note.selMode === 'lasso' ? '➰' : '⬚';
       if (note.tool !== 'select') clearSelection();
+      $('#tool-delete').classList.toggle('sel-del', !!note.sel);
       $('#tool-size').innerHTML = `<span class="dot" style="width:${6 + note.size * 5}px;height:${6 + note.size * 5}px;background:currentColor"></span>`;
       $('#tool-finger').classList.toggle('active', note.finger);
       $('#tool-undo').disabled = !note.undo.length;
@@ -910,13 +1034,15 @@
     function applyOp(op, reverse) {
       clearSelection();
       if (op.type === 'move') {
-        moveStrokes(op.strokes, reverse ? -op.dx : op.dx, reverse ? -op.dy : op.dy);
+        moveStrokes(op.strokes, reverse ? -op.dx : op.dx, reverse ? -op.dy : op.dy, true, op.images);
         changed(); redraw();
         return;
       }
       const add = op.type === 'add' ? !reverse : reverse;
       if (add) op.strokes.forEach(({ s, i }) => note.doc.strokes.splice(Math.min(i, note.doc.strokes.length), 0, s));
       else op.strokes.forEach(({ s }) => { const i = note.doc.strokes.indexOf(s); if (i >= 0) note.doc.strokes.splice(i, 1); });
+      if (add) (op.images || []).forEach(({ img, i }) => note.doc.images.splice(Math.min(i, note.doc.images.length), 0, img));
+      else (op.images || []).forEach(({ img }) => { const i = note.doc.images.indexOf(img); if (i >= 0) note.doc.images.splice(i, 1); });
       changed();
       redraw();
     }
@@ -943,15 +1069,16 @@
           note.doc.strokes.pop(); current = null; redraw();
         }
       }
-      if (!drawsWith(e)) return;
+      // Une zone sélectionnée (une photo par exemple) se déplace aussi au doigt
+      const dragsSel = e.pointerType === 'touch' && note.tool === 'select' && inSelection(...toPage(e));
+      if (!drawsWith(e) && !dragsSel) return;
       try { canvas.setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
       if (e.pointerType === 'pen') penDown = true;
       const [x, y] = toPage(e);
       $('#note-tip').textContent = '';
       if (note.tool === 'eraser') { erasing = { pointer: e.pointerId, removed: [] }; eraseAt(x, y); return; }
       if (note.tool === 'select') {
-        const b = note.sel?.box, m = 10;
-        if (b && x >= b[0] - m && x <= b[2] + m && y >= b[1] - m && y <= b[3] + m) {
+        if (inSelection(x, y)) {
           selGesture = { pointer: e.pointerId, kind: 'move', x, y, dx: 0, dy: 0 };
         } else {
           note.sel = null;
@@ -987,7 +1114,7 @@
         } else {
           // La zone suit le stylet ; la page s'allonge si on la descend
           const dx = x - selGesture.x, dy = y - selGesture.y;
-          moveStrokes(note.sel.strokes, dx, dy, false);
+          moveStrokes(note.sel.strokes, dx, dy, false, note.sel.images);
           note.sel.box = note.sel.box.map((v, i) => v + (i % 2 ? dy : dx));
           selGesture.dx += dx; selGesture.dy += dy; selGesture.x = x; selGesture.y = y;
           grow(note.sel.box[3]);
@@ -1027,7 +1154,7 @@
         if (selGesture.kind === 'region') finishRegion();
         else if (Math.abs(selGesture.dx) + Math.abs(selGesture.dy) > 0.5) {
           moveStrokes(note.sel.strokes, 0, 0);
-          note.undo.push({ type: 'move', strokes: note.sel.strokes, dx: selGesture.dx, dy: selGesture.dy });
+          note.undo.push({ type: 'move', strokes: note.sel.strokes, images: note.sel.images, dx: selGesture.dx, dy: selGesture.dy });
           note.redo = [];
           changed();
         }
@@ -1072,7 +1199,7 @@
       const now = nowIso();
       const meta = { ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date, done: $('#note-done').checked ? 1 : 0, updated_at: now };
       const strokes = note.doc.strokes.map(({ c, s, a, pts }) => ({ c, s, a, pts }));
-      await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: note.doc.h, strokes }) });
+      await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: note.doc.h, strokes, images: note.doc.images }) });
       cache.docs = cache.docs.filter(d => d.id !== meta.id).concat(meta);
       save(CACHE_KEY, cache);
       note.meta = meta;
@@ -1083,7 +1210,52 @@
 
     $('#note-date').addEventListener('change', () => { if (!$('#note-date').value) $('#note-date').value = note.meta.visit_date; changed(); });
     $('#note-done').addEventListener('change', () => { changed(); toast($('#note-done').checked ? 'Visite marquée comme traitée' : 'Visite à traiter'); });
+    $('#note-type').addEventListener('click', e => {
+      const v = e.target.closest('button')?.dataset.v;
+      if (!v) return;
+      note.meta.visit_type = v;
+      renderTypeSeg($('#note-type'), v);
+      changed();
+    });
     $('#note-back').addEventListener('click', () => history.back());
+
+    // ---------- Ajout d'une photo ----------
+    const photoMenu = open => { $('#photo-bg').hidden = $('#photo-menu').hidden = !open; };
+    $('#tool-photo').addEventListener('click', () => photoMenu(true));
+    $('#photo-bg').addEventListener('click', () => photoMenu(false));
+    $('#photo-cancel').addEventListener('click', () => photoMenu(false));
+
+    async function addPhoto(file) {
+      photoMenu(false);
+      if (!file || !note.meta) return;
+      try {
+        const { base64, width, height } = await Ink.preparePhoto(file);
+        const id = newId();
+        await idb.putPhoto({ id, data: base64 });
+        save(PHOTO_OUTBOX, [...load(PHOTO_OUTBOX, []), id]);
+        // Sous ce qui est déjà écrit si c'est visible à l'écran, sinon en haut de l'écran
+        const scale = Math.min(800 / width, 800 / height, 1), w = width * scale, h = height * scale;
+        const viewTop = pageOffset() / note.k, viewBottom = viewTop + note.viewH / note.k, bottom = usedBottom();
+        const y = Math.round((bottom > viewTop && bottom < viewBottom - 100 ? bottom : viewTop) + 30);
+        const img = { id, x: Math.round((Ink.W - w) / 2), y, w: Math.round(w), h: Math.round(h) };
+        note.doc.images.push(img);
+        while (note.doc.h - 500 < img.y + img.h) note.doc.h += 1000;
+        pageEl.style.height = `${note.doc.h * note.k}px`;
+        note.undo.push({ type: 'add', strokes: [], images: [{ img, i: note.doc.images.length - 1 }] });
+        note.redo = [];
+        // La photo arrive sélectionnée : on peut la faire glisser tout de suite
+        note.tool = 'select';
+        note.sel = { strokes: [], images: [img], box: selBox([], [img]) };
+        $('#note-tip').textContent = '';
+        changed(); redraw(); renderTools();
+        toast('Photo ajoutée : faites-la glisser pour la placer');
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+    for (const input of [$('#photo-camera'), $('#photo-pick')]) {
+      input.addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; addPhoto(file); });
+    }
 
     async function leaveNote() {
       const meta = note.meta;
@@ -1097,6 +1269,7 @@
     }
 
     $('#tool-delete').addEventListener('click', async () => {
+      if (note.sel) { removeSelection(); return; } // avec une sélection, 🗑 retire la zone et non la visite
       if (!confirm('Supprimer cette visite ? Elle sera aussi supprimée du PC.')) return;
       const now = nowIso();
       if (!note.isNew) cache.docs = cache.docs.map(d => d.id === note.meta.id ? { ...d, deleted: 1, updated_at: now } : d);
@@ -1114,6 +1287,14 @@
       const clean = node => {
         for (const child of [...node.childNodes]) {
           if (child.nodeType === 3) continue;
+          if (child.tagName === 'IMG') {
+            // Seules les photos du CRM sont gardées ; leur image est ajoutée à l'affichage
+            const id = child.getAttribute('data-photo');
+            if (!Ink.PHOTO_ID.test(id || '')) { child.remove(); continue; }
+            for (const a of [...child.attributes]) child.removeAttribute(a.name);
+            child.setAttribute('data-photo', id);
+            continue;
+          }
           if (child.nodeType !== 1 || ['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'IMG', 'SVG'].includes(child.tagName)) { child.remove(); continue; }
           clean(child);
           if (!ALLOWED.has(child.tagName)) { child.replaceWith(...child.childNodes); continue; }
@@ -1135,21 +1316,36 @@
         } catch { /* hors connexion */ }
       }
       if (!rec) { toast('Document pas encore disponible sur ce téléphone (connexion nécessaire)'); return; }
-      $('#v-title').textContent = `Visite du ${fmtDay(meta.visit_date)}`;
+      $('#v-title').textContent = `${visitLabel(meta)} du ${fmtDay(meta.visit_date)}`;
       $('#v-body').innerHTML = sanitizeHtml(rec.body) || '<p class="muted">Document vide.</p>';
+      for (const img of $$('#v-body img[data-photo]')) {
+        photoData(img.dataset.photo).then(data => { if (data) img.src = `data:image/jpeg;base64,${data}`; }).catch(() => {});
+      }
       $('#v-done').checked = !!meta.done;
+      renderTypeSeg($('#v-type'), meta.visit_type);
       show('view', { docId: meta.id });
     }
 
     // Case « traitée » d'un document du PC : le contenu est déjà sur le téléphone, il repart avec
-    $('#v-done').addEventListener('change', async e => {
+    async function patchViewedDoc(patch) {
       const now = nowIso(), id = state.docId;
       const rec = await idb.get(id);
       if (rec) await idb.put({ ...rec, updated_at: now });
-      cache.docs = cache.docs.map(d => d.id === id ? { ...d, done: e.target.checked ? 1 : 0, updated_at: now } : d);
+      cache.docs = cache.docs.map(d => d.id === id ? { ...d, ...patch, updated_at: now } : d);
       save(CACHE_KEY, cache);
       syncSoon(500);
+    }
+    $('#v-done').addEventListener('change', async e => {
+      await patchViewedDoc({ done: e.target.checked ? 1 : 0 });
       toast(e.target.checked ? 'Visite marquée comme traitée' : 'Visite à traiter');
+    });
+    $('#v-type').addEventListener('click', async e => {
+      const v = e.target.closest('button')?.dataset.v;
+      if (!v) return;
+      renderTypeSeg($('#v-type'), v);
+      const meta = cache.docs.find(d => d.id === state.docId);
+      $('#v-title').textContent = `${VISIT_TYPES[v]} du ${fmtDay(meta.visit_date)}`;
+      await patchViewedDoc({ visit_type: v });
     });
 
     // ---------- Réglages ----------

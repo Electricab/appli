@@ -1,11 +1,14 @@
 // Notes au stylet : format des traits et dessin sur un canvas. Fichier identique sur le PC
 // (CRM Electricab/public/ink.js) et sur le téléphone (dépôt appli, dossier crm/).
 //
-// Format enregistré (JSON) : { v: 1, w: 1000, h: <hauteur>, strokes: [{ c: couleur, s: épaisseur, a: opacité, p: "x,y,pression,…" }] }
+// Format enregistré (JSON) : { v: 1, w: 1000, h: <hauteur>, images: [{ id, x, y, w, h }],
+//   strokes: [{ c: couleur, s: épaisseur, a: opacité, p: "x,y,pression,…" }] }
 // Les coordonnées sont en unités de page (largeur 1000), donc indépendantes de la taille de l'écran ;
-// la pression va de 1 à 9 (5 quand l'appareil ne la mesure pas).
+// la pression va de 1 à 9 (5 quand l'appareil ne la mesure pas). Les photos sont dans des fichiers à part
+// (une seule fois dans le dépôt, même si la note change souvent) et se placent sous les traits.
 const Ink = (() => {
   const W = 1000;
+  const PHOTO_ID = /^[0-9a-f-]{36}$/i;
 
   function decode(body) {
     let doc;
@@ -16,11 +19,13 @@ const Ink = (() => {
         c: s.c || '#1b1f24', s: Number(s.s) || 3, a: Number(s.a) || 1,
         pts: typeof s.p === 'string' ? s.p.split(',').map(Number) : (s.pts || []),
       })),
+      images: (doc.images || []).filter(i => PHOTO_ID.test(i.id)).map(({ id, x, y, w, h }) => ({ id, x: Number(x), y: Number(y), w: Number(w), h: Number(h) })),
     };
   }
 
   const encode = doc => JSON.stringify({
     v: 1, w: W, h: Math.round(doc.h),
+    ...(doc.images?.length ? { images: doc.images.map(({ id, x, y, w, h }) => ({ id, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) })) } : {}),
     strokes: doc.strokes.map(s => ({ c: s.c, s: s.s, ...(s.a !== 1 ? { a: s.a } : {}), p: s.pts.join(',') })),
   });
 
@@ -67,8 +72,20 @@ const Ink = (() => {
     ctx.restore();
   }
 
-  // Lignes de cahier, puis tous les traits
-  function drawPage(ctx, doc, k, { lines = true } = {}) {
+  // Photo pas encore chargée : un cadre gris à sa place
+  function drawImage(ctx, i, k, image) {
+    const el = image?.(i.id);
+    if (el?.complete && el.naturalWidth) { ctx.drawImage(el, i.x * k, i.y * k, i.w * k, i.h * k); return; }
+    ctx.save();
+    ctx.fillStyle = '#eef0f3';
+    ctx.fillRect(i.x * k, i.y * k, i.w * k, i.h * k);
+    ctx.fillStyle = '#6b7280'; ctx.font = '14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('📷 Photo', (i.x + i.w / 2) * k, (i.y + i.h / 2) * k);
+    ctx.restore();
+  }
+
+  // Lignes de cahier, photos, puis tous les traits
+  function drawPage(ctx, doc, k, { lines = true, image } = {}) {
     const cw = ctx.canvas.width, ch = ctx.canvas.height;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -84,13 +101,15 @@ const Ink = (() => {
       }
       ctx.restore();
     }
+    for (const i of doc.images || []) drawImage(ctx, i, k, image);
     for (const s of doc.strokes) drawStroke(ctx, s, k);
   }
 
   // Affiche une page entière dans un canvas qui prend la largeur de son conteneur
-  function render(canvas, body) {
+  function render(canvas, body, image) {
     const doc = decode(body);
-    const used = doc.strokes.reduce((m, s) => { for (let i = 1; i < s.pts.length; i += 3) m = Math.max(m, s.pts[i]); return m; }, 0);
+    let used = doc.strokes.reduce((m, s) => { for (let i = 1; i < s.pts.length; i += 3) m = Math.max(m, s.pts[i]); return m; }, 0);
+    for (const i of doc.images) used = Math.max(used, i.y + i.h);
     const h = Math.max(used + 80, 600);
     const cssW = canvas.parentElement.clientWidth || 800, dpr = window.devicePixelRatio || 1;
     const k = cssW / W;
@@ -99,7 +118,7 @@ const Ink = (() => {
     canvas.height = Math.round(h * k * dpr);
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawPage(ctx, { ...doc, h }, k);
+    drawPage(ctx, { ...doc, h }, k, { image });
   }
 
   // Le trait passe-t-il à moins de r unités du point (x, y) ? (gomme)
@@ -121,5 +140,28 @@ const Ink = (() => {
     return false;
   }
 
-  return { W, decode, encode, drawStroke, drawPage, render, hits };
+  // Photo prête à enregistrer : JPEG d'au plus 1600 px et sous la taille que GitHub renvoie directement (1 Mo)
+  async function preparePhoto(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode().catch(() => { throw new Error('Cette image ne peut pas être lue'); });
+      let scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        if (base64.length < 1200000) return { base64, width: canvas.width, height: canvas.height };
+        scale *= 0.8;
+      }
+      throw new Error('Photo trop volumineuse');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  return { W, PHOTO_ID, decode, encode, drawStroke, drawPage, render, hits, preparePhoto };
 })();
