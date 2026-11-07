@@ -179,6 +179,12 @@
     .crop-box i:nth-child(4) { right: -4px; bottom: -4px; border-left: 0; border-top: 0; }
     .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
     .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
+    .aff-menu { max-height: 85vh; overflow: auto; }
+    .aff-new { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .aff-new .btn { width: auto; padding: 12px 16px; }
+    .chip.add { margin-left: auto; font-size: 0.8rem; color: var(--accent); border-color: var(--accent); }
+    ul.list li .aff-ico { font-size: 20px; flex: none; }
+    .aff-tag { display: inline-block; font-size: 0.75rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 0 6px; }
     .html-doc img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
     .html-doc {background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
     .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
@@ -246,10 +252,26 @@
       <button class="icon-btn" id="btn-edit" aria-label="Modifier">✎</button>
     </header>
     <div class="card" id="c-card"></div>
-    <h2>Documents</h2>
+    <h2>Affaires <button class="chip add" id="btn-new-aff">＋ Affaire</button></h2>
+    <ul class="list" id="affs"></ul>
+    <p class="muted" id="affs-empty">Aucune affaire pour ce client.</p>
+    <h2>Toutes les notes</h2>
     <ul class="list" id="docs"></ul>
-    <p class="muted" id="docs-empty">Aucun document pour ce client.</p>
+    <p class="muted" id="docs-empty">Aucune note pour ce client.</p>
     <button class="btn fab" id="btn-visit">✍️ Nouvelle visite</button>
+  </section>
+
+  <!-- ===== Affaire ===== -->
+  <section id="affaire" class="screen" hidden>
+    <header class="bar">
+      <button class="icon-btn" data-back aria-label="Retour">←</button>
+      <h1 id="a-title"></h1>
+      <button class="icon-btn" id="btn-aff-rename" aria-label="Renommer">✎</button>
+    </header>
+    <p class="muted" id="a-sub"></p>
+    <ul class="list" id="a-docs"></ul>
+    <p class="muted" id="a-docs-empty">Aucune note dans cette affaire.</p>
+    <button class="btn fab" id="btn-aff-visit">✍️ Nouvelle visite</button>
   </section>
 
   <!-- ===== Création / modification rapide ===== -->
@@ -348,6 +370,18 @@
     <p class="muted">Document créé sur le PC : il se modifie dans le CRM du PC.</p>
   </section>
 
+  <!-- ===== Nouvelle visite depuis la fiche : choix de l'affaire ===== -->
+  <div class="photo-bg" id="aff-bg" hidden></div>
+  <div class="photo-menu aff-menu" id="aff-menu" hidden>
+    <strong>Rattacher la visite à :</strong>
+    <ul class="list" id="aff-choices"></ul>
+    <form id="aff-new-form" class="aff-new">
+      <input id="aff-new-name" placeholder="Nouvelle affaire (ex. Rénovation cuisine)" maxlength="120" autocomplete="off">
+      <button class="btn" id="aff-new-go">Créer</button>
+    </form>
+    <button type="button" class="btn secondary" id="aff-cancel">Annuler</button>
+  </div>
+
   <!-- ===== Ajout d'une photo ===== -->
   <div class="photo-bg" id="photo-bg" hidden></div>
   <div class="photo-menu" id="photo-menu" hidden>
@@ -390,6 +424,7 @@
     // Première ouverture : reprend le dépôt et la clé de la page « Manques » s'ils existent
     let config = load(KEY, null) || load('manque-config', {});
     let cache = load(CACHE_KEY, { clients: [], docs: [], synced_at: null });
+    cache.affaires ||= [];
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -529,6 +564,15 @@
       await putJson(path('clients.json'), { version: 1, clients: merged }, remote.sha, 'Téléphone : mise à jour des clients');
     });
 
+    const syncAffaires = () => withRetry(async () => {
+      const remote = await getJson(path('affaires.json'));
+      const remoteItems = remote.json?.affaires || [];
+      const merged = mergeById(remoteItems, cache.affaires);
+      cache.affaires = merged; save(CACHE_KEY, cache);
+      if (remote.json && sameJson(mergeById([], remoteItems), merged)) return;
+      await putJson(path('affaires.json'), { version: 1, affaires: merged }, remote.sha, 'Téléphone : mise à jour des affaires');
+    });
+
     async function putDoc(meta) {
       const rec = await idb.get(meta.id);
       if (!rec && !meta.deleted) return; // contenu pas sur ce téléphone : rien à envoyer
@@ -586,6 +630,7 @@
         try {
           await saveNote.flush?.();
           await syncClients();
+          await syncAffaires();
           await pushPhotos();
           await syncDocs();
           cache.synced_at = nowIso(); save(CACHE_KEY, cache);
@@ -613,11 +658,18 @@
     }
 
     // ---------- Écrans ----------
-    const state = { screen: 'list', clientId: null, docId: null, cat: '', editing: null };
+    const state = { screen: 'list', clientId: null, affaireId: null, docId: null, cat: '', editing: null };
     const liveClients = () => cache.clients.filter(c => !c.deleted);
     const getClient = id => cache.clients.find(c => c.id === id && !c.deleted);
-    const clientDocs = id => cache.docs.filter(d => d.client_id === id && !d.deleted)
-      .sort((a, b) => b.visit_date.localeCompare(a.visit_date) || b.created_at.localeCompare(a.created_at));
+    const byVisit = (a, b) => b.visit_date.localeCompare(a.visit_date) || b.created_at.localeCompare(a.created_at);
+    const clientDocs = id => cache.docs.filter(d => d.client_id === id && !d.deleted).sort(byVisit);
+    const affaireDocs = id => cache.docs.filter(d => d.affaire_id === id && !d.deleted).sort(byVisit);
+    const getAffaire = id => cache.affaires.find(a => a.id === id && !a.deleted);
+    // Affaires d'un client, la plus récemment active en premier
+    const clientAffaires = id => cache.affaires.filter(a => a.client_id === id && !a.deleted).map(a => {
+      const docs = affaireDocs(a.id);
+      return { ...a, docs, last: docs[0]?.visit_date || a.created_at.slice(0, 10) };
+    }).sort((x, y) => y.last.localeCompare(x.last) || y.created_at.localeCompare(x.created_at));
 
     // Chaque écran est une entrée d'historique : le bouton retour d'Android revient à l'écran précédent
     function show(screen, params = {}, { push = true } = {}) {
@@ -640,6 +692,7 @@
       if (!ready && state.screen !== 'setup') { showSetup(false); return; }
       if (state.screen === 'list') renderList();
       else if (state.screen === 'client') renderClient();
+      else if (state.screen === 'affaire') renderAffaire();
     }
 
     // ---------- Liste ----------
@@ -706,35 +759,122 @@
           ${d.email ? `<a href="mailto:${esc(d.email)}">✉️ Email</a>` : ''}
           ${addr.length ? `<a class="${phone && d.email ? 'wide' : ''}" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.join(', '))}" target="_blank" rel="noopener">📍 Itinéraire</a>` : ''}
         </div>`;
-      const docs = clientDocs(c.id);
-      $('#docs').innerHTML = docs.map(doc => `
+      const affs = clientAffaires(c.id);
+      $('#affs').innerHTML = affs.map(a => {
+        const open = a.docs.filter(d => !d.done).length;
+        return `<li class="tap" data-aff="${esc(a.id)}">
+          <span class="aff-ico">📁</span>
+          <div class="grow">
+            <div class="title">${esc(a.nom)}</div>
+            <div class="muted">${a.docs.length} note(s)${open ? ` · <strong>${open} à traiter</strong>` : ''}${a.docs[0] ? ` · ${esc(fmtDay(a.docs[0].visit_date))}` : ''}</div>
+          </div>
+        </li>`;
+      }).join('');
+      $('#affs').hidden = !affs.length;
+      $('#affs-empty').hidden = affs.length > 0;
+      renderDocList($('#docs'), $('#docs-empty'), clientDocs(c.id), true);
+    }
+
+    function renderDocList(list, empty, docs, withAffaire) {
+      list.innerHTML = docs.map(doc => `
         <li class="tap${doc.done ? ' done' : ''}" data-id="${esc(doc.id)}">
           <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
           <div class="grow">
             <div class="title">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
-            <div class="muted">${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
+            <div class="muted">${withAffaire ? `<span class="aff-tag">${esc(getAffaire(doc.affaire_id)?.nom || 'Sans affaire')}</span> ` : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
-      $('#docs').hidden = !docs.length;
-      $('#docs-empty').hidden = docs.length > 0;
+      list.hidden = !docs.length;
+      empty.hidden = docs.length > 0;
     }
 
+    // ---------- Affaire ----------
+    function renderAffaire() {
+      const a = getAffaire(state.affaireId);
+      if (!a) { show('client', { clientId: state.clientId }, { push: false }); return; }
+      const docs = affaireDocs(a.id), open = docs.filter(d => !d.done).length;
+      $('#a-title').textContent = a.nom;
+      $('#a-sub').textContent = [getClient(a.client_id)?.nom, docs.length ? `${docs.length} note(s)` : '', open ? `${open} à traiter` : ''].filter(Boolean).join(' · ');
+      renderDocList($('#a-docs'), $('#a-docs-empty'), docs, false);
+    }
+
+    function newAffaire(clientId, nom) {
+      const now = nowIso();
+      const a = { id: newId(), client_id: clientId, nom: nom.trim().slice(0, 120), deleted: 0, created_at: now, updated_at: now };
+      cache.affaires.push(a); save(CACHE_KEY, cache);
+      syncSoon(500);
+      return a;
+    }
+
+    $('#affs').addEventListener('click', e => {
+      const li = e.target.closest('li[data-aff]');
+      if (li) show('affaire', { affaireId: li.dataset.aff });
+    });
+    $('#btn-new-aff').addEventListener('click', () => {
+      const nom = prompt('Nom de la nouvelle affaire :');
+      if (!nom?.trim()) return;
+      const a = newAffaire(state.clientId, nom);
+      show('affaire', { affaireId: a.id });
+    });
+    $('#btn-aff-rename').addEventListener('click', () => {
+      const a = getAffaire(state.affaireId);
+      const nom = prompt('Nom de l\'affaire :', a.nom);
+      if (!nom?.trim() || nom.trim() === a.nom) return;
+      cache.affaires = cache.affaires.map(x => x.id === a.id ? { ...x, nom: nom.trim().slice(0, 120), updated_at: nowIso() } : x);
+      save(CACHE_KEY, cache);
+      syncSoon(500);
+      renderAffaire();
+    });
+    $('#btn-aff-visit').addEventListener('click', () => createVisit(state.affaireId));
+
+    // Depuis la fiche : choisir l'affaire de la nouvelle visite (existante ou nouvelle)
+    const affMenu = open => { $('#aff-bg').hidden = $('#aff-menu').hidden = !open; };
+    $('#aff-bg').addEventListener('click', () => affMenu(false));
+    $('#aff-cancel').addEventListener('click', () => affMenu(false));
+    $('#aff-choices').addEventListener('click', e => {
+      const li = e.target.closest('li[data-aff]');
+      if (!li) return;
+      affMenu(false);
+      createVisit(li.dataset.aff);
+    });
+    $('#aff-new-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const nom = $('#aff-new-name').value;
+      if (!nom.trim()) { $('#aff-new-name').focus(); toast('Indiquez le nom de la nouvelle affaire'); return; }
+      affMenu(false);
+      createVisit(newAffaire(state.clientId, nom).id);
+    });
+
     $('#btn-edit').addEventListener('click', () => openForm(getClient(state.clientId)));
-    $('#docs').addEventListener('click', e => {
+    const openDocFromList = e => {
       const li = e.target.closest('li[data-id]');
       if (!li) return;
       const meta = cache.docs.find(d => d.id === li.dataset.id);
       if (meta.format === 'ink') openNote(meta.id);
       else openHtml(meta);
+    };
+    $('#docs').addEventListener('click', openDocFromList);
+    $('#a-docs').addEventListener('click', openDocFromList);
+
+    $('#btn-visit').addEventListener('click', () => {
+      const affs = clientAffaires(state.clientId);
+      $('#aff-choices').innerHTML = affs.map(a => `
+        <li class="tap" data-aff="${esc(a.id)}"><span class="aff-ico">📁</span>
+          <div class="grow"><div class="title">${esc(a.nom)}</div><div class="muted">${a.docs.length} note(s)</div></div></li>`).join('');
+      $('#aff-choices').hidden = !affs.length;
+      $('#aff-new-name').value = '';
+      affMenu(true);
+      if (!affs.length) $('#aff-new-name').focus();
     });
-    $('#btn-visit').addEventListener('click', async () => {
-      const now = nowIso();
-      const meta = { id: newId(), client_id: state.clientId, kind: 'visite', format: 'ink', visit_date: today(), visit_type: 'pre_devis', done: 0,
+
+    async function createVisit(affaireId) {
+      const a = getAffaire(affaireId), now = nowIso();
+      const meta = { id: newId(), client_id: a.client_id, affaire_id: a.id, kind: 'visite', format: 'ink', visit_date: today(), visit_type: 'pre_devis', done: 0,
         source: 'phone', deleted: 0, created_at: now, updated_at: now };
       // La visite n'entre dans la liste qu'au premier trait (pas de document vide si on ressort aussitôt)
       await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: 0, strokes: [] }) });
       openNote(meta.id, meta);
-    });
+    }
 
     // ---------- Création / modification ----------
     const fNom = $('#f-nom'), fCode = $('#f-code');
