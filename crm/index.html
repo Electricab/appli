@@ -167,6 +167,18 @@
     .photo-menu label { margin: 0; font-size: 1rem; }
     .photo-menu label.btn { color: var(--accent-text); }
     .photo-menu label.btn.secondary { color: var(--text); }
+    .crop-screen { position: fixed; inset: 0; z-index: 15; background: #000; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+    .crop-area { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; }
+    .crop-stage { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .crop-stage img { display: block; width: 100%; height: 100%; pointer-events: none; }
+    .crop-box { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.6); pointer-events: none; }
+    .crop-box i { position: absolute; width: 22px; height: 22px; border: 4px solid #fff; }
+    .crop-box i:nth-child(1) { left: -4px; top: -4px; border-right: 0; border-bottom: 0; }
+    .crop-box i:nth-child(2) { right: -4px; top: -4px; border-left: 0; border-bottom: 0; }
+    .crop-box i:nth-child(3) { left: -4px; bottom: -4px; border-right: 0; border-top: 0; }
+    .crop-box i:nth-child(4) { right: -4px; bottom: -4px; border-left: 0; border-top: 0; }
+    .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
+    .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
     .html-doc img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
     .html-doc {background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
     .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
@@ -296,6 +308,7 @@
         </div>
         <button class="tool wide" id="tool-photo" aria-label="Ajouter une photo">📷</button>
         <button class="tool wide" id="tool-finger" aria-label="Écrire au doigt">☝</button>
+        <button class="tool wide" id="tool-crop" aria-label="Rogner la photo" hidden>✂️</button>
         <button class="tool wide" id="tool-delete" aria-label="Supprimer">🗑</button>
       </div>
       <div class="note-row">
@@ -341,6 +354,21 @@
     <label class="btn"><input type="file" id="photo-camera" accept="image/*" capture="environment" hidden>📸 Prendre une photo</label>
     <label class="btn secondary"><input type="file" id="photo-pick" accept="image/*" hidden>🖼️ Choisir une photo existante</label>
     <button type="button" class="btn secondary" id="photo-cancel">Annuler</button>
+  </div>
+
+  <!-- ===== Rognage d'une photo ===== -->
+  <div class="crop-screen" id="crop" hidden>
+    <div class="crop-area" id="crop-area">
+      <div class="crop-stage" id="crop-stage">
+        <img id="crop-img" alt="" draggable="false">
+        <div class="crop-box" id="crop-box"><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+    <div class="crop-actions">
+      <button type="button" class="btn secondary" id="crop-cancel">Annuler</button>
+      <button type="button" class="btn secondary" id="crop-full">Photo entière</button>
+      <button type="button" class="btn" id="crop-ok">Valider</button>
+    </div>
   </div>
 
   <div class="toast" id="toast" hidden></div>
@@ -601,6 +629,7 @@
       refresh();
     }
     window.addEventListener('popstate', e => {
+      if (!$('#crop').hidden) { closeCrop(); return; } // retour : ferme le rognage et reste sur la note
       const s = e.state || { screen: 'list' };
       show(s.screen, s, { push: false });
     });
@@ -1017,6 +1046,10 @@
       $('#tool-select').textContent = note.selMode === 'lasso' ? '➰' : '⬚';
       if (note.tool !== 'select') clearSelection();
       $('#tool-delete').classList.toggle('sel-del', !!note.sel);
+      // Une photo seule sélectionnée : ✂️ prend la place de ☝
+      const onePhoto = note.sel?.images?.length === 1 && !note.sel.strokes.length;
+      $('#tool-crop').hidden = !onePhoto;
+      $('#tool-finger').hidden = onePhoto;
       $('#tool-size').innerHTML = `<span class="dot" style="width:${6 + note.size * 5}px;height:${6 + note.size * 5}px;background:currentColor"></span>`;
       $('#tool-finger').classList.toggle('active', note.finger);
       $('#tool-undo').disabled = !note.undo.length;
@@ -1033,6 +1066,11 @@
 
     function applyOp(op, reverse) {
       clearSelection();
+      if (op.type === 'crop') {
+        Object.assign(op.img, reverse ? op.before : op.after);
+        changed(); redraw();
+        return;
+      }
       if (op.type === 'move') {
         moveStrokes(op.strokes, reverse ? -op.dx : op.dx, reverse ? -op.dy : op.dy, true, op.images);
         changed(); redraw();
@@ -1248,11 +1286,113 @@
         note.sel = { strokes: [], images: [img], box: selBox([], [img]) };
         $('#note-tip').textContent = '';
         changed(); redraw(); renderTools();
-        toast('Photo ajoutée : faites-la glisser pour la placer');
+        toast('Photo ajoutée : faites-la glisser pour la placer, ✂️ pour la rogner');
       } catch (e) {
         toast(e.message);
       }
     }
+    // ---------- Rognage ----------
+    // La photo entière s'affiche : on peut donc élargir ou annuler un rognage déjà fait.
+    // Le rectangle se règle au stylet ou au doigt : coins et bords pour le redimensionner, intérieur pour le déplacer.
+    const CROP_MIN = 0.05, CROP_GRAB = 30;
+    const crop = { img: null, c: null, gesture: null };
+    const cropStage = $('#crop-stage');
+
+    function renderCropBox() {
+      const box = $('#crop-box').style, c = crop.c;
+      box.left = `${c.x * 100}%`; box.top = `${c.y * 100}%`; box.width = `${c.w * 100}%`; box.height = `${c.h * 100}%`;
+    }
+
+    // La photo entière tient dans la zone disponible, sans déformation
+    function fitCropStage() {
+      if (!crop.img) return;
+      const el = $('#crop-img'), area = $('#crop-area').getBoundingClientRect();
+      const maxW = area.width - 48, maxH = area.height - 48;
+      const scale = Math.min(maxW / el.naturalWidth, maxH / el.naturalHeight);
+      cropStage.style.width = `${el.naturalWidth * scale}px`;
+      cropStage.style.height = `${el.naturalHeight * scale}px`;
+    }
+    window.addEventListener('resize', fitCropStage);
+
+    function closeCrop() {
+      $('#crop').hidden = true;
+      crop.img = null; crop.gesture = null;
+    }
+
+    $('#tool-crop').addEventListener('click', () => {
+      const img = note.sel?.images?.[0], el = img && noteImage(img.id);
+      if (!el?.naturalWidth) { toast('Photo pas encore chargée (connexion nécessaire)'); return; }
+      const [x, y, w, h] = img.c || [0, 0, 1, 1];
+      crop.img = img;
+      crop.c = { x, y, w, h };
+      $('#crop-img').src = el.src;
+      $('#crop').hidden = false;
+      fitCropStage();
+      renderCropBox();
+      history.pushState({ ...state }, '');
+    });
+
+    cropStage.addEventListener('pointerdown', e => {
+      if (crop.gesture) return;
+      const r = cropStage.getBoundingClientRect(), c = crop.c;
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const L = c.x * r.width, R = (c.x + c.w) * r.width, T = c.y * r.height, B = (c.y + c.h) * r.height;
+      const nearX = py > T - CROP_GRAB && py < B + CROP_GRAB, nearY = px > L - CROP_GRAB && px < R + CROP_GRAB;
+      // Le bord le plus proche l'emporte quand le rectangle est petit
+      const edgeX = !nearX ? '' : Math.abs(px - L) <= Math.abs(px - R) ? (Math.abs(px - L) < CROP_GRAB ? 'l' : '') : (Math.abs(px - R) < CROP_GRAB ? 'r' : '');
+      const edgeY = !nearY ? '' : Math.abs(py - T) <= Math.abs(py - B) ? (Math.abs(py - T) < CROP_GRAB ? 't' : '') : (Math.abs(py - B) < CROP_GRAB ? 'b' : '');
+      const inside = px > L && px < R && py > T && py < B;
+      if (!edgeX && !edgeY && !inside) return;
+      crop.gesture = { pointer: e.pointerId, edgeX, edgeY, sx: e.clientX, sy: e.clientY, start: { ...c }, W: r.width, H: r.height };
+      try { cropStage.setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
+    });
+
+    cropStage.addEventListener('pointermove', e => {
+      const g = crop.gesture;
+      if (g?.pointer !== e.pointerId) return;
+      const dx = (e.clientX - g.sx) / g.W, dy = (e.clientY - g.sy) / g.H, s = g.start;
+      const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+      let { x, y, w, h } = s;
+      if (!g.edgeX && !g.edgeY) {
+        x = clamp(s.x + dx, 0, 1 - s.w); y = clamp(s.y + dy, 0, 1 - s.h);
+      } else {
+        if (g.edgeX === 'l') { x = clamp(s.x + dx, 0, s.x + s.w - CROP_MIN); w = s.x + s.w - x; }
+        if (g.edgeX === 'r') w = clamp(s.w + dx, CROP_MIN, 1 - s.x);
+        if (g.edgeY === 't') { y = clamp(s.y + dy, 0, s.y + s.h - CROP_MIN); h = s.y + s.h - y; }
+        if (g.edgeY === 'b') h = clamp(s.h + dy, CROP_MIN, 1 - s.y);
+      }
+      crop.c = { x, y, w, h };
+      renderCropBox();
+    });
+    const endCropGesture = e => { if (crop.gesture?.pointer === e.pointerId) crop.gesture = null; };
+    cropStage.addEventListener('pointerup', endCropGesture);
+    cropStage.addEventListener('pointercancel', endCropGesture);
+
+    $('#crop-full').addEventListener('click', () => { crop.c = { x: 0, y: 0, w: 1, h: 1 }; renderCropBox(); });
+    $('#crop-cancel').addEventListener('click', () => history.back());
+    $('#crop-ok').addEventListener('click', () => {
+      const img = crop.img, c = crop.c;
+      const [ox, oy, ow, oh] = img.c || [0, 0, 1, 1];
+      if (Math.abs(c.x - ox) + Math.abs(c.y - oy) + Math.abs(c.w - ow) + Math.abs(c.h - oh) > 0.001) {
+        // La partie gardée reste à sa place dans la page et à la même échelle
+        const fullW = img.w / ow, fullH = img.h / oh;
+        const w = c.w * fullW, h = c.h * fullH;
+        const x = Math.max(0, Math.min(Ink.W - w, img.x + (c.x - ox) * fullW));
+        const y = Math.max(0, img.y + (c.y - oy) * fullH);
+        const whole = c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1;
+        const before = { x: img.x, y: img.y, w: img.w, h: img.h, c: img.c };
+        const after = { x, y, w, h, c: whole ? undefined : [c.x, c.y, c.w, c.h] };
+        Object.assign(img, after);
+        while (note.doc.h - 500 < img.y + img.h) note.doc.h += 1000;
+        pageEl.style.height = `${note.doc.h * note.k}px`;
+        note.undo.push({ type: 'crop', img, before, after });
+        note.redo = [];
+        note.sel.box = selBox([], [img]);
+        changed(); redraw(); renderTools();
+      }
+      history.back();
+    });
+
     for (const input of [$('#photo-camera'), $('#photo-pick')]) {
       input.addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; addPhoto(file); });
     }

@@ -1,14 +1,16 @@
 // Notes au stylet : format des traits et dessin sur un canvas. Fichier identique sur le PC
 // (CRM Electricab/public/ink.js) et sur le téléphone (dépôt appli, dossier crm/).
 //
-// Format enregistré (JSON) : { v: 1, w: 1000, h: <hauteur>, images: [{ id, x, y, w, h }],
+// Format enregistré (JSON) : { v: 1, w: 1000, h: <hauteur>, images: [{ id, x, y, w, h, c: [x, y, l, h] }],
 //   strokes: [{ c: couleur, s: épaisseur, a: opacité, p: "x,y,pression,…" }] }
 // Les coordonnées sont en unités de page (largeur 1000), donc indépendantes de la taille de l'écran ;
 // la pression va de 1 à 9 (5 quand l'appareil ne la mesure pas). Les photos sont dans des fichiers à part
 // (une seule fois dans le dépôt, même si la note change souvent) et se placent sous les traits.
+// c = zone gardée d'une photo rognée, en fractions de la photo entière (le fichier reste intact).
 const Ink = (() => {
   const W = 1000;
   const PHOTO_ID = /^[0-9a-f-]{36}$/i;
+  const validCrop = c => Array.isArray(c) && c.length === 4 && c.every(v => Number(v) >= 0 && Number(v) <= 1) && c[2] > 0 && c[3] > 0;
 
   function decode(body) {
     let doc;
@@ -19,13 +21,17 @@ const Ink = (() => {
         c: s.c || '#1b1f24', s: Number(s.s) || 3, a: Number(s.a) || 1,
         pts: typeof s.p === 'string' ? s.p.split(',').map(Number) : (s.pts || []),
       })),
-      images: (doc.images || []).filter(i => PHOTO_ID.test(i.id)).map(({ id, x, y, w, h }) => ({ id, x: Number(x), y: Number(y), w: Number(w), h: Number(h) })),
+      images: (doc.images || []).filter(i => PHOTO_ID.test(i.id)).map(({ id, x, y, w, h, c }) => ({
+        id, x: Number(x), y: Number(y), w: Number(w), h: Number(h), ...(validCrop(c) ? { c: c.map(Number) } : {}),
+      })),
     };
   }
 
   const encode = doc => JSON.stringify({
     v: 1, w: W, h: Math.round(doc.h),
-    ...(doc.images?.length ? { images: doc.images.map(({ id, x, y, w, h }) => ({ id, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) })) } : {}),
+    ...(doc.images?.length ? { images: doc.images.map(({ id, x, y, w, h, c }) => ({
+      id, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), ...(c ? { c: c.map(v => Math.round(v * 10000) / 10000) } : {}),
+    })) } : {}),
     strokes: doc.strokes.map(s => ({ c: s.c, s: s.s, ...(s.a !== 1 ? { a: s.a } : {}), p: s.pts.join(',') })),
   });
 
@@ -75,7 +81,11 @@ const Ink = (() => {
   // Photo pas encore chargée : un cadre gris à sa place
   function drawImage(ctx, i, k, image) {
     const el = image?.(i.id);
-    if (el?.complete && el.naturalWidth) { ctx.drawImage(el, i.x * k, i.y * k, i.w * k, i.h * k); return; }
+    if (el?.complete && el.naturalWidth) {
+      const [cx, cy, cw, ch] = i.c || [0, 0, 1, 1], nw = el.naturalWidth, nh = el.naturalHeight;
+      ctx.drawImage(el, cx * nw, cy * nh, cw * nw, ch * nh, i.x * k, i.y * k, i.w * k, i.h * k);
+      return;
+    }
     ctx.save();
     ctx.fillStyle = '#eef0f3';
     ctx.fillRect(i.x * k, i.y * k, i.w * k, i.h * k);
