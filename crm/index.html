@@ -180,6 +180,9 @@
     .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
     .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
     .aff-menu { max-height: 85vh; overflow: auto; }
+    .note-aff { position: absolute; left: 8px; top: 6px; font-size: 0.75rem; color: #0f766e; pointer-events: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .aff-move { margin-bottom: 12px; text-align: left; }
+    ul.list li.current { background: var(--accent-soft); }
     .aff-new { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .aff-new .btn { width: auto; padding: 12px 16px; }
     .chip.add { margin-left: auto; font-size: 0.8rem; color: var(--accent); border-color: var(--accent); }
@@ -319,7 +322,7 @@
     <div class="note-bar">
       <div class="note-row">
         <button class="icon-btn" id="note-back" aria-label="Retour">←</button>
-        <label class="lbl" for="note-date" style="margin:0">Visite du</label>
+        <button class="tool wide" id="note-aff-btn" aria-label="Changer d'affaire">📁</button>
         <input type="date" id="note-date">
         <label class="done-toggle"><input type="checkbox" id="note-done"> Traitée</label>
       </div>
@@ -351,6 +354,7 @@
     <div id="page">
       <canvas id="ink"></canvas>
       <div id="note-tip"></div>
+      <span class="note-aff" id="note-aff"></span>
       <span class="save-state" id="note-state"></span>
     </div>
   </section>
@@ -365,6 +369,7 @@
       <button type="button" data-v="pre_devis">Visite pré-devis</button>
       <button type="button" data-v="realisation">Réalisation</button>
     </div>
+    <button type="button" class="btn secondary aff-move" id="v-aff"></button>
     <label class="done-toggle big"><input type="checkbox" id="v-done"> Visite traitée</label>
     <div class="html-doc" id="v-body"></div>
     <p class="muted">Document créé sur le PC : il se modifie dans le CRM du PC.</p>
@@ -373,7 +378,7 @@
   <!-- ===== Nouvelle visite depuis la fiche : choix de l'affaire ===== -->
   <div class="photo-bg" id="aff-bg" hidden></div>
   <div class="photo-menu aff-menu" id="aff-menu" hidden>
-    <strong>Rattacher la visite à :</strong>
+    <strong id="aff-menu-title">Rattacher la visite à :</strong>
     <ul class="list" id="aff-choices"></ul>
     <form id="aff-new-form" class="aff-new">
       <input id="aff-new-name" placeholder="Nouvelle affaire (ex. Rénovation cuisine)" maxlength="120" autocomplete="off">
@@ -831,18 +836,57 @@
     const affMenu = open => { $('#aff-bg').hidden = $('#aff-menu').hidden = !open; };
     $('#aff-bg').addEventListener('click', () => affMenu(false));
     $('#aff-cancel').addEventListener('click', () => affMenu(false));
+    let affPicker = null; // { clientId, onPick }
+
+    function openAffPicker(clientId, title, currentId, onPick) {
+      affPicker = { clientId, onPick };
+      const affs = clientAffaires(clientId);
+      $('#aff-menu-title').textContent = title;
+      $('#aff-choices').innerHTML = affs.map(a => `
+        <li class="tap${a.id === currentId ? ' current' : ''}" data-aff="${esc(a.id)}"><span class="aff-ico">${a.id === currentId ? '✓' : '📁'}</span>
+          <div class="grow"><div class="title">${esc(a.nom)}</div><div class="muted">${a.docs.length} note(s)</div></div></li>`).join('');
+      $('#aff-choices').hidden = !affs.length;
+      $('#aff-new-name').value = '';
+      affMenu(true);
+      if (!affs.length) $('#aff-new-name').focus();
+    }
+
     $('#aff-choices').addEventListener('click', e => {
       const li = e.target.closest('li[data-aff]');
       if (!li) return;
       affMenu(false);
-      createVisit(li.dataset.aff);
+      affPicker.onPick(li.dataset.aff);
     });
     $('#aff-new-form').addEventListener('submit', e => {
       e.preventDefault();
       const nom = $('#aff-new-name').value;
       if (!nom.trim()) { $('#aff-new-name').focus(); toast('Indiquez le nom de la nouvelle affaire'); return; }
       affMenu(false);
-      createVisit(newAffaire(state.clientId, nom).id);
+      affPicker.onPick(newAffaire(affPicker.clientId, nom).id);
+    });
+
+    const affaireLabel = id => `📁 ${getAffaire(id)?.nom || 'Sans affaire'}`;
+
+    // Note au stylet : le changement d'affaire s'enregistre comme les autres modifications de la note
+    $('#note-aff-btn').addEventListener('click', () => {
+      openAffPicker(note.meta.client_id, 'Déplacer la note dans :', note.meta.affaire_id, id => {
+        if (id === note.meta.affaire_id) return;
+        note.meta.affaire_id = id;
+        $('#note-aff').textContent = affaireLabel(id);
+        changed();
+        toast(`Note déplacée dans « ${getAffaire(id).nom} »`);
+      });
+    });
+
+    // Note texte du PC
+    $('#v-aff').addEventListener('click', () => {
+      const meta = cache.docs.find(d => d.id === state.docId);
+      openAffPicker(meta.client_id, 'Déplacer la note dans :', meta.affaire_id, async id => {
+        if (id === meta.affaire_id) return;
+        $('#v-aff').textContent = `${affaireLabel(id)} — changer`;
+        await patchViewedDoc({ affaire_id: id });
+        toast(`Note déplacée dans « ${getAffaire(id).nom} »`);
+      });
     });
 
     $('#btn-edit').addEventListener('click', () => openForm(getClient(state.clientId)));
@@ -856,16 +900,7 @@
     $('#docs').addEventListener('click', openDocFromList);
     $('#a-docs').addEventListener('click', openDocFromList);
 
-    $('#btn-visit').addEventListener('click', () => {
-      const affs = clientAffaires(state.clientId);
-      $('#aff-choices').innerHTML = affs.map(a => `
-        <li class="tap" data-aff="${esc(a.id)}"><span class="aff-ico">📁</span>
-          <div class="grow"><div class="title">${esc(a.nom)}</div><div class="muted">${a.docs.length} note(s)</div></div></li>`).join('');
-      $('#aff-choices').hidden = !affs.length;
-      $('#aff-new-name').value = '';
-      affMenu(true);
-      if (!affs.length) $('#aff-new-name').focus();
-    });
+    $('#btn-visit').addEventListener('click', () => openAffPicker(state.clientId, 'Rattacher la visite à :', null, createVisit));
 
     async function createVisit(affaireId) {
       const a = getAffaire(affaireId), now = nowIso();
@@ -979,6 +1014,7 @@
       $('#note-date').value = meta.visit_date;
       $('#note-done').checked = !!meta.done;
       renderTypeSeg($('#note-type'), meta.visit_type);
+      $('#note-aff').textContent = affaireLabel(meta.affaire_id);
       note.sel = null;
       $('#note-state').textContent = '';
       show('note', { docId: id });
@@ -1603,6 +1639,7 @@
       }
       $('#v-done').checked = !!meta.done;
       renderTypeSeg($('#v-type'), meta.visit_type);
+      $('#v-aff').textContent = `${affaireLabel(meta.affaire_id)} — changer`;
       show('view', { docId: meta.id });
     }
 
