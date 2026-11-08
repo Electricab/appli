@@ -180,6 +180,7 @@
     .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
     .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
     .aff-menu { max-height: 85vh; overflow: auto; }
+    .aff-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
     .st-chip[data-s="etude"], .st.etude, .st-seg [data-s="etude"] { --c: #1d4ed8; --b: #dbeafe; }
     .st-chip[data-s="attente"], .st.attente, .st-seg [data-s="attente"] { --c: #b45309; --b: #fef3c7; }
     .st-chip[data-s="accepte"], .st.accepte, .st-seg [data-s="accepte"] { --c: #15803d; --b: #dcfce7; }
@@ -401,12 +402,16 @@
   <div class="photo-bg" id="aff-bg" hidden></div>
   <div class="photo-menu aff-menu" id="aff-menu" hidden>
     <strong id="aff-menu-title">Rattacher la visite à :</strong>
+    <span class="muted">Touchez une ou plusieurs affaires.</span>
     <ul class="list" id="aff-choices"></ul>
     <form id="aff-new-form" class="aff-new">
       <input id="aff-new-name" placeholder="Nouvelle affaire (ex. Rénovation cuisine)" maxlength="120" autocomplete="off">
-      <button class="btn" id="aff-new-go">Créer</button>
+      <button class="btn" id="aff-new-go">Ajouter</button>
     </form>
-    <button type="button" class="btn secondary" id="aff-cancel">Annuler</button>
+    <div class="aff-actions">
+      <button type="button" class="btn secondary" id="aff-cancel">Annuler</button>
+      <button type="button" class="btn" id="aff-ok">Valider</button>
+    </div>
   </div>
 
   <!-- ===== Ajout d'une photo ===== -->
@@ -708,7 +713,9 @@
     const getClient = id => cache.clients.find(c => c.id === id && !c.deleted);
     const byVisit = (a, b) => b.visit_date.localeCompare(a.visit_date) || b.created_at.localeCompare(a.created_at);
     const clientDocs = id => cache.docs.filter(d => d.client_id === id && !d.deleted).sort(byVisit);
-    const affaireDocs = id => cache.docs.filter(d => d.affaire_id === id && !d.deleted).sort(byVisit);
+    // Affaires d'une note : liste affaire_ids, ou ancienne affaire unique affaire_id
+    const docAffIds = d => Array.isArray(d.affaire_ids) ? d.affaire_ids : d.affaire_id ? [d.affaire_id] : [];
+    const affaireDocs = id => cache.docs.filter(d => docAffIds(d).includes(id) && !d.deleted).sort(byVisit);
     const getAffaire = id => cache.affaires.find(a => a.id === id && !a.deleted);
     // Affaires d'un client, la plus récemment active en premier
     const clientAffaires = id => cache.affaires.filter(a => a.client_id === id && !a.deleted).map(a => {
@@ -845,7 +852,7 @@
           <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
           <div class="grow">
             <div class="title">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
-            <div class="muted">${withAffaire ? `<span class="aff-tag">${esc(getAffaire(doc.affaire_id)?.nom || 'Sans affaire')}</span> ` : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
+            <div class="muted">${withAffaire ? (docAffIds(doc).map(id => `<span class="aff-tag">${esc(getAffaire(id)?.nom || 'Affaire')}</span> `).join('') || '<span class="aff-tag">Sans affaire</span> ') : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
       list.hidden = !docs.length;
@@ -901,62 +908,81 @@
       syncSoon(500);
       renderAffaire();
     });
-    $('#btn-aff-visit').addEventListener('click', () => createVisit(state.affaireId));
+    $('#btn-aff-visit').addEventListener('click', () => createVisit([state.affaireId]));
 
     // Depuis la fiche : choisir l'affaire de la nouvelle visite (existante ou nouvelle)
     const affMenu = open => { $('#aff-bg').hidden = $('#aff-menu').hidden = !open; };
     $('#aff-bg').addEventListener('click', () => affMenu(false));
     $('#aff-cancel').addEventListener('click', () => affMenu(false));
-    let affPicker = null; // { clientId, onPick }
+    // Choix d'une ou plusieurs affaires : chaque appui coche ou décoche, « Valider » applique
+    let affPicker = null; // { clientId, selected: Set, onPick(ids) }
 
-    function openAffPicker(clientId, title, currentId, onPick) {
-      affPicker = { clientId, onPick };
-      const affs = clientAffaires(clientId);
-      $('#aff-menu-title').textContent = title;
-      $('#aff-choices').innerHTML = affs.map(a => `
-        <li class="tap${a.id === currentId ? ' current' : ''}" data-aff="${esc(a.id)}"><span class="aff-ico">${a.id === currentId ? '✓' : '📁'}</span>
-          <div class="grow"><div class="title">${esc(a.nom)}</div><div class="muted">${a.docs.length} note(s)</div></div></li>`).join('');
+    function renderAffChoices() {
+      const affs = clientAffaires(affPicker.clientId);
+      $('#aff-choices').innerHTML = affs.map(a => {
+        const on = affPicker.selected.has(a.id);
+        return `<li class="tap${on ? ' current' : ''}" data-aff="${esc(a.id)}"><span class="aff-ico">${on ? '☑' : '☐'}</span>
+          <div class="grow"><div class="title">${esc(a.nom)}</div><div class="muted">${a.docs.length} note(s)</div></div></li>`;
+      }).join('');
       $('#aff-choices').hidden = !affs.length;
+    }
+
+    function openAffPicker(clientId, title, currentIds, onPick) {
+      affPicker = { clientId, selected: new Set(currentIds), onPick };
+      $('#aff-menu-title').textContent = title;
       $('#aff-new-name').value = '';
+      renderAffChoices();
       affMenu(true);
-      if (!affs.length) $('#aff-new-name').focus();
+      if (!clientAffaires(clientId).length) $('#aff-new-name').focus();
     }
 
     $('#aff-choices').addEventListener('click', e => {
       const li = e.target.closest('li[data-aff]');
       if (!li) return;
-      affMenu(false);
-      affPicker.onPick(li.dataset.aff);
+      const sel = affPicker.selected;
+      if (sel.has(li.dataset.aff)) sel.delete(li.dataset.aff); else sel.add(li.dataset.aff);
+      renderAffChoices();
     });
     $('#aff-new-form').addEventListener('submit', e => {
       e.preventDefault();
       const nom = $('#aff-new-name').value;
       if (!nom.trim()) { $('#aff-new-name').focus(); toast('Indiquez le nom de la nouvelle affaire'); return; }
+      affPicker.selected.add(newAffaire(affPicker.clientId, nom).id);
+      $('#aff-new-name').value = '';
+      renderAffChoices();
+    });
+    $('#aff-ok').addEventListener('click', () => {
+      // Les affaires gardent l'ordre de la liste
+      const ids = clientAffaires(affPicker.clientId).map(a => a.id).filter(id => affPicker.selected.has(id));
+      if (!ids.length) { toast('Choisissez au moins une affaire'); return; }
       affMenu(false);
-      affPicker.onPick(newAffaire(affPicker.clientId, nom).id);
+      affPicker.onPick(ids);
     });
 
-    const affaireLabel = id => `📁 ${getAffaire(id)?.nom || 'Sans affaire'}`;
+    const affaireNames = ids => ids.map(id => getAffaire(id)?.nom).filter(Boolean).join(', ');
+    const affaireLabel = ids => `📁 ${affaireNames(ids) || 'Sans affaire'}`;
+    const sameIds = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 
-    // Note au stylet : le changement d'affaire s'enregistre comme les autres modifications de la note
+    // Note au stylet : le changement d'affaires s'enregistre comme les autres modifications de la note
     $('#note-aff-btn').addEventListener('click', () => {
-      openAffPicker(note.meta.client_id, 'Déplacer la note dans :', note.meta.affaire_id, id => {
-        if (id === note.meta.affaire_id) return;
-        note.meta.affaire_id = id;
-        $('#note-aff').textContent = affaireLabel(id);
+      openAffPicker(note.meta.client_id, 'Rattacher la note à :', docAffIds(note.meta), ids => {
+        if (sameIds(ids, docAffIds(note.meta))) return;
+        note.meta.affaire_ids = ids;
+        note.meta.affaire_id = ids[0];
+        $('#note-aff').textContent = affaireLabel(ids);
         changed();
-        toast(`Note déplacée dans « ${getAffaire(id).nom} »`);
+        toast(`Note rattachée à : ${affaireNames(ids)}`);
       });
     });
 
     // Note texte du PC
     $('#v-aff').addEventListener('click', () => {
       const meta = cache.docs.find(d => d.id === state.docId);
-      openAffPicker(meta.client_id, 'Déplacer la note dans :', meta.affaire_id, async id => {
-        if (id === meta.affaire_id) return;
-        $('#v-aff').textContent = `${affaireLabel(id)} — changer`;
-        await patchViewedDoc({ affaire_id: id });
-        toast(`Note déplacée dans « ${getAffaire(id).nom} »`);
+      openAffPicker(meta.client_id, 'Rattacher la note à :', docAffIds(meta), async ids => {
+        if (sameIds(ids, docAffIds(meta))) return;
+        $('#v-aff').textContent = `${affaireLabel(ids)} — changer`;
+        await patchViewedDoc({ affaire_ids: ids, affaire_id: ids[0] });
+        toast(`Note rattachée à : ${affaireNames(ids)}`);
       });
     });
 
@@ -971,11 +997,11 @@
     $('#docs').addEventListener('click', openDocFromList);
     $('#a-docs').addEventListener('click', openDocFromList);
 
-    $('#btn-visit').addEventListener('click', () => openAffPicker(state.clientId, 'Rattacher la visite à :', null, createVisit));
+    $('#btn-visit').addEventListener('click', () => openAffPicker(state.clientId, 'Rattacher la visite à :', [], createVisit));
 
-    async function createVisit(affaireId) {
-      const a = getAffaire(affaireId), now = nowIso();
-      const meta = { id: newId(), client_id: a.client_id, affaire_id: a.id, kind: 'visite', format: 'ink', visit_date: today(), visit_type: 'pre_devis', done: 0,
+    async function createVisit(affaireIds) {
+      const a = getAffaire(affaireIds[0]), now = nowIso();
+      const meta = { id: newId(), client_id: a.client_id, affaire_id: a.id, affaire_ids: affaireIds, kind: 'visite', format: 'ink', visit_date: today(), visit_type: 'pre_devis', done: 0,
         source: 'phone', deleted: 0, created_at: now, updated_at: now };
       // La visite n'entre dans la liste qu'au premier trait (pas de document vide si on ressort aussitôt)
       await idb.put({ id: meta.id, updated_at: now, body: Ink.encode({ h: 0, strokes: [] }) });
@@ -1085,7 +1111,7 @@
       $('#note-date').value = meta.visit_date;
       $('#note-done').checked = !!meta.done;
       renderTypeSeg($('#note-type'), meta.visit_type);
-      $('#note-aff').textContent = affaireLabel(meta.affaire_id);
+      $('#note-aff').textContent = affaireLabel(docAffIds(meta));
       note.sel = null;
       $('#note-state').textContent = '';
       show('note', { docId: id });
@@ -1710,7 +1736,7 @@
       }
       $('#v-done').checked = !!meta.done;
       renderTypeSeg($('#v-type'), meta.visit_type);
-      $('#v-aff').textContent = `${affaireLabel(meta.affaire_id)} — changer`;
+      $('#v-aff').textContent = `${affaireLabel(docAffIds(meta))} — changer`;
       show('view', { docId: meta.id });
     }
 
