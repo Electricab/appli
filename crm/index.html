@@ -180,6 +180,16 @@
     .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
     .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
     .aff-menu { max-height: 85vh; overflow: auto; }
+    .st-chip[data-s="etude"], .st.etude, .st-seg [data-s="etude"] { --c: #1d4ed8; --b: #dbeafe; }
+    .st-chip[data-s="attente"], .st.attente, .st-seg [data-s="attente"] { --c: #b45309; --b: #fef3c7; }
+    .st-chip[data-s="accepte"], .st.accepte, .st-seg [data-s="accepte"] { --c: #15803d; --b: #dcfce7; }
+    .st-chip[data-s="realise"], .st.realise, .st-seg [data-s="realise"] { --c: #4b5563; --b: #e5e7eb; }
+    .st-filters { flex-wrap: wrap; }
+    .st-chip.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 600; }
+    .st { display: inline-block; font-size: 0.72rem; font-weight: 600; color: var(--c); background: var(--b); border-radius: 8px; padding: 0 6px; margin: 2px 3px 0 0; }
+    .st-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 0 12px; }
+    .st-seg button { font: inherit; font-size: 0.78rem; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .st-seg button.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 700; }
     .note-aff { position: absolute; left: 8px; top: 6px; font-size: 0.75rem; color: #0f766e; pointer-events: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .aff-move { margin-bottom: 12px; text-align: left; }
     ul.list li.current { background: var(--accent-soft); }
@@ -241,6 +251,12 @@
       <button class="chip" data-cat="prospect">Prospects</button>
       <button class="chip" data-cat="client">Clients</button>
     </div>
+    <div class="filters st-filters" id="st-filter">
+      <button class="chip st-chip" data-s="etude">Étude</button>
+      <button class="chip st-chip" data-s="attente">Attente</button>
+      <button class="chip st-chip" data-s="accepte">Accepté</button>
+      <button class="chip st-chip" data-s="realise">Réalisé</button>
+    </div>
     <ul class="list" id="clients"></ul>
     <p class="muted" id="clients-empty"></p>
     <p class="muted" id="sync-info"></p>
@@ -272,6 +288,12 @@
       <button class="icon-btn" id="btn-aff-rename" aria-label="Renommer">✎</button>
     </header>
     <p class="muted" id="a-sub"></p>
+    <div class="st-seg" id="a-statut">
+      <button type="button" data-s="etude">Étude</button>
+      <button type="button" data-s="attente">Attente réponse</button>
+      <button type="button" data-s="accepte">Accepté</button>
+      <button type="button" data-s="realise">Réalisé</button>
+    </div>
     <ul class="list" id="a-docs"></ul>
     <p class="muted" id="a-docs-empty">Aucune note dans cette affaire.</p>
     <button class="btn fab" id="btn-aff-visit">✍️ Nouvelle visite</button>
@@ -441,6 +463,10 @@
       .toUpperCase().replace(/Œ/g, 'OE').replace(/Æ/g, 'AE').replace(/[^A-Z0-9]/g, '').slice(0, 8);
     const CATEGORIES = { prospect: 'Prospect', client: 'Client' };
     const VISIT_TYPES = { pre_devis: 'Visite pré-devis', realisation: 'Réalisation' };
+    const AFFAIRE_STATUTS = { etude: 'Étude', attente: 'Attente réponse', accepte: 'Accepté', realise: 'Réalisé' };
+    const statutOf = a => AFFAIRE_STATUTS[a.statut] ? a.statut : 'etude';
+    // Statuts choisis dans le filtre de la liste, gardés sur ce téléphone ; aucun choix = tous les clients
+    const statutFilter = new Set(load('crm-statut-filter', []));
     const visitLabel = d => VISIT_TYPES[d.visit_type] || VISIT_TYPES.pre_devis;
     const renderTypeSeg = (el, type) => el.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === (type || 'pre_devis')));
     const PAYS = [['FR', 'France'], ['BE', 'Belgique'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['MC', 'Monaco'],
@@ -720,6 +746,7 @@
       const all = liveClients();
       const found = all
         .filter(c => !state.cat || c.data.categorie === state.cat)
+        .filter(c => !statutFilter.size || liveAffaires(c.id).some(a => statutFilter.has(statutOf(a))))
         .filter(c => {
           if (!words.length) return true;
           const d = c.data;
@@ -732,9 +759,12 @@
           <div class="grow">
             <div class="title">${esc(c.nom)}</div>
             <div class="muted">${esc(c.code)}${c.data.devis_ville ? ' · ' + esc(c.data.devis_ville) : ''}</div>
+            <div>${liveAffaires(c.id).filter(a => !statutFilter.size || statutFilter.has(statutOf(a)))
+              .map(a => `<span class="st ${statutOf(a)}">${esc(a.nom)}</span>`).join('')}</div>
           </div>
           <span class="badge ${esc(c.data.categorie)}">${CATEGORIES[c.data.categorie] || ''}</span>
         </li>`).join('');
+      renderStatutFilter();
       $('#clients').hidden = !found.length;
       $('#clients-empty').textContent = found.length ? '' : all.length ? 'Aucun client ne correspond.' : 'Aucun client pour l\'instant.';
       $('#sync-info').textContent = [
@@ -744,11 +774,26 @@
     }
 
     $('#q').addEventListener('input', renderList);
-    $$('.chip').forEach(ch => ch.addEventListener('click', () => {
+    $$('.chip[data-cat]').forEach(ch => ch.addEventListener('click', () => {
       state.cat = ch.dataset.cat;
-      $$('.chip').forEach(c => c.classList.toggle('active', c === ch));
+      $$('.chip[data-cat]').forEach(c => c.classList.toggle('active', c === ch));
       renderList();
     }));
+    const liveAffaires = clientId => cache.affaires.filter(a => a.client_id === clientId && !a.deleted);
+    function renderStatutFilter() {
+      $$('#st-filter .st-chip').forEach(b => {
+        const n = liveClients().filter(c => liveAffaires(c.id).some(a => statutOf(a) === b.dataset.s)).length;
+        b.classList.toggle('active', statutFilter.has(b.dataset.s));
+        b.textContent = `${b.dataset.s === 'attente' ? 'Attente' : AFFAIRE_STATUTS[b.dataset.s]} (${n})`;
+      });
+    }
+    $('#st-filter').addEventListener('click', e => {
+      const st = e.target.closest('.st-chip')?.dataset.s;
+      if (!st) return;
+      if (statutFilter.has(st)) statutFilter.delete(st); else statutFilter.add(st);
+      save('crm-statut-filter', [...statutFilter]);
+      renderList();
+    });
     $('#clients').addEventListener('click', e => {
       const li = e.target.closest('li[data-id]');
       if (li) show('client', { clientId: li.dataset.id });
@@ -784,7 +829,7 @@
         return `<li class="tap" data-aff="${esc(a.id)}">
           <span class="aff-ico">📁</span>
           <div class="grow">
-            <div class="title">${esc(a.nom)}</div>
+            <div class="title">${esc(a.nom)} <span class="st ${statutOf(a)}">${AFFAIRE_STATUTS[statutOf(a)]}</span></div>
             <div class="muted">${a.docs.length} note(s)${open ? ` · <strong>${open} à traiter</strong>` : ''}${a.docs[0] ? ` · ${esc(fmtDay(a.docs[0].visit_date))}` : ''}</div>
           </div>
         </li>`;
@@ -814,12 +859,24 @@
       const docs = affaireDocs(a.id), open = docs.filter(d => !d.done).length;
       $('#a-title').textContent = a.nom;
       $('#a-sub').textContent = [getClient(a.client_id)?.nom, docs.length ? `${docs.length} note(s)` : '', open ? `${open} à traiter` : ''].filter(Boolean).join(' · ');
+      $$('#a-statut button').forEach(b => b.classList.toggle('active', b.dataset.s === statutOf(a)));
       renderDocList($('#a-docs'), $('#a-docs-empty'), docs, false);
     }
 
+    $('#a-statut').addEventListener('click', e => {
+      const st = e.target.closest('button')?.dataset.s;
+      const a = getAffaire(state.affaireId);
+      if (!st || !a || st === statutOf(a)) return;
+      cache.affaires = cache.affaires.map(x => x.id === a.id ? { ...x, statut: st, updated_at: nowIso() } : x);
+      save(CACHE_KEY, cache);
+      syncSoon(500);
+      renderAffaire();
+      toast(`Affaire : ${AFFAIRE_STATUTS[st]}`);
+    });
+
     function newAffaire(clientId, nom) {
       const now = nowIso();
-      const a = { id: newId(), client_id: clientId, nom: nom.trim().slice(0, 120), deleted: 0, created_at: now, updated_at: now };
+      const a = { id: newId(), client_id: clientId, nom: nom.trim().slice(0, 120), statut: 'etude', deleted: 0, created_at: now, updated_at: now };
       cache.affaires.push(a); save(CACHE_KEY, cache);
       syncSoon(500);
       return a;
