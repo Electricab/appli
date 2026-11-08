@@ -578,6 +578,7 @@
       await putJson(path('affaires.json'), { version: 1, affaires: merged }, remote.sha, 'Téléphone : mise à jour des affaires');
     });
 
+    // rec.pushed = version dont le contenu est dans le dépôt
     async function putDoc(meta) {
       const rec = await idb.get(meta.id);
       if (!rec && !meta.deleted) return; // contenu pas sur ce téléphone : rien à envoyer
@@ -586,6 +587,16 @@
         const existing = await gh('GET', p);
         await putJson(p, { ...meta, body: meta.deleted ? '' : rec.body }, existing?.sha, 'Téléphone : notes de visite');
       });
+      const cur = await idb.get(meta.id);
+      if (cur && cur.updated_at === meta.updated_at) await idb.put({ ...cur, pushed: meta.updated_at });
+    }
+
+    // Note au stylet dont la version annoncée dans le dépôt n'a jamais été envoyée (modifiée pendant un envoi) :
+    // le téléphone a ce contenu, il le renvoie
+    async function unsent(l, r) {
+      if (l.format !== 'ink' || l.deleted || l.updated_at !== r.updated_at) return false;
+      const rec = await idb.get(l.id);
+      return !!rec && rec.pushed !== rec.updated_at && String(rec.updated_at) >= String(l.updated_at);
     }
 
     // Photos : gardées sur le téléphone, envoyées une seule fois, avant la note qui les cite
@@ -617,12 +628,15 @@
       const remote = await getJson(path('documents.json'));
       const remoteMetas = remote.json?.documents || [];
       const remoteById = new Map(remoteMetas.map(m => [m.id, m]));
-      for (const l of cache.docs) {
+      const local = cache.docs.slice(); // versions envoyées pendant ce passage
+      for (const l of local) {
         const r = remoteById.get(l.id);
-        if (!r || String(l.updated_at) > String(r.updated_at)) await putDoc(l);
+        if (!r || String(l.updated_at) > String(r.updated_at) || await unsent(l, r)) await putDoc(l);
       }
-      const merged = mergeById(remoteMetas, cache.docs);
-      cache.docs = merged; save(CACHE_KEY, cache);
+      // La liste n'annonce que les versions envoyées ci-dessus ; une note modifiée pendant l'envoi
+      // garde sa nouvelle version sur le téléphone et partira au prochain passage
+      const merged = mergeById(remoteMetas, local);
+      cache.docs = mergeById(merged, cache.docs); save(CACHE_KEY, cache);
       if (remote.json && sameJson(mergeById([], remoteMetas), merged)) return;
       await putJson(path('documents.json'), { version: 1, documents: merged }, remote.sha, 'Téléphone : liste des documents');
     });
@@ -1002,7 +1016,7 @@
       if (!newMeta && (!rec || String(rec.updated_at) < String(meta.updated_at))) {
         try {
           const file = await getJson(path(`docs/${id}.json`));
-          if (file.json) { rec = { id, updated_at: file.json.updated_at, body: file.json.body }; await idb.put(rec); }
+          if (file.json) { rec = { id, updated_at: file.json.updated_at, body: file.json.body, pushed: file.json.updated_at }; await idb.put(rec); }
         } catch { /* hors connexion : version du téléphone */ }
       }
       if (!rec) { toast('Notes pas encore disponibles sur ce téléphone (connexion nécessaire)'); return; }
@@ -1628,7 +1642,7 @@
       if (!rec || String(rec.updated_at) < String(meta.updated_at)) {
         try {
           const file = await getJson(path(`docs/${meta.id}.json`));
-          if (file.json) { rec = { id: meta.id, updated_at: file.json.updated_at, body: file.json.body }; await idb.put(rec); }
+          if (file.json) { rec = { id: meta.id, updated_at: file.json.updated_at, body: file.json.body, pushed: file.json.updated_at }; await idb.put(rec); }
         } catch { /* hors connexion */ }
       }
       if (!rec) { toast('Document pas encore disponible sur ce téléphone (connexion nécessaire)'); return; }
