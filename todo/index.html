@@ -1,0 +1,612 @@
+<!doctype html>
+<!--
+  To do list Electricab — la MÊME page sert sur le PC et sur le téléphone :
+  - PC : plateforme (http://localhost:4000/todo/). Elle passe par le serveur de la plateforme,
+    qui ajoute la clé GitHub (le navigateur ne la voit jamais).
+  - Téléphone : dépôt Electricab/appli, dossier todo/. Elle parle directement à GitHub
+    avec la clé du téléphone (reprise de la page Manques si elle y est déjà).
+  Les tâches sont dans le fichier todo.json du dépôt privé, fusionnées tâche par tâche :
+  la version modifiée le plus récemment l'emporte. Chaque appareil garde une copie
+  et fonctionne sans réseau ; les modifications partent dès que la connexion revient.
+  Après une modification ici, recopier ce dossier dans le dépôt appli (voir README).
+-->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>To do list</title>
+  <meta name="theme-color" content="#7c3aed">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --surface: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --accent: #7c3aed;
+      --accent-soft: #ede9fe;
+      --ok: #16a34a;
+      --warn-bg: #fef3c7; --warn-text: #92400e;
+      --err-bg: #fee2e2; --err-text: #b91c1c;
+      --danger: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1216;
+        --surface: #191d23;
+        --text: #e8eaed;
+        --muted: #9aa3ad;
+        --border: #2d333b;
+        --accent: #a78bfa;
+        --accent-soft: #2e2546;
+        --warn-bg: #3a2e12; --warn-text: #fcd34d;
+        --err-bg: #3b1717; --err-text: #fca5a5;
+        --danger: #f87171;
+      }
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+
+    header {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; gap: 12px;
+      padding: max(14px, env(safe-area-inset-top)) 16px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    header a { color: var(--muted); text-decoration: none; font-size: 14px; white-space: nowrap; }
+    header h1 { margin: 0; font-size: 19px; flex: 1; }
+    .icon-btn {
+      border: 1px solid var(--border); background: var(--surface);
+      border-radius: 10px; padding: 6px 10px; font-size: 15px;
+    }
+
+    main { max-width: 760px; margin: 0 auto; padding: 18px 16px 60px; }
+
+    .banner { padding: 10px 14px; border-radius: 10px; font-size: 14px; margin-bottom: 14px; }
+    .banner.warn { background: var(--warn-bg); color: var(--warn-text); }
+    .banner.error { background: var(--err-bg); color: var(--err-text); }
+
+    #add { display: flex; gap: 8px; margin-bottom: 14px; }
+    #add input {
+      flex: 1; min-width: 0;
+      padding: 12px 14px; font-size: 16px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    }
+    #add input:focus, dialog input:focus, dialog textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .btn {
+      padding: 10px 16px; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--surface); font-size: 15px; white-space: nowrap;
+    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .btn.danger { color: var(--danger); }
+    .btn:disabled { opacity: .5; cursor: default; }
+
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-bottom: 10px; font-size: 14px; color: var(--muted);
+    }
+    .toolbar label { display: flex; align-items: center; gap: 6px; }
+    .toolbar select {
+      padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+    }
+
+    ul.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .task {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden;
+    }
+    .task.open { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .row { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; }
+    .check {
+      flex: none; width: 26px; height: 26px; border-radius: 50%;
+      border: 2px solid var(--muted); background: transparent;
+      display: grid; place-items: center; font-size: 14px; color: transparent; padding: 0;
+    }
+    .task.done .check { background: var(--ok); border-color: var(--ok); color: #fff; }
+    .main {
+      flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 8px 4px;
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    .title { flex: 1; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .task.done .title { text-decoration: line-through; color: var(--muted); }
+    .date { flex: none; font-size: 13px; color: var(--muted); white-space: nowrap; }
+    .has-desc { color: var(--muted); font-size: 12px; }
+    .moves { flex: none; display: flex; gap: 2px; }
+    .moves button {
+      width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); font-size: 12px; padding: 0;
+    }
+    .moves button:disabled { opacity: .3; cursor: default; }
+    .details { padding: 0 14px 12px 46px; }
+    .desc { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
+    .desc.empty { color: var(--muted); font-style: italic; }
+    .meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .actions .btn { padding: 7px 14px; font-size: 14px; }
+
+    .section-title {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      margin: 22px 0 10px; padding: 0; background: none; border: 0;
+      font-size: 14px; font-weight: 600; color: var(--muted); text-align: left;
+    }
+    .empty-msg { color: var(--muted); text-align: center; padding: 30px 0; font-size: 15px; }
+    .sync-info { margin-top: 26px; text-align: center; font-size: 12px; color: var(--muted); }
+
+    dialog {
+      width: min(560px, calc(100vw - 24px)); padding: 0;
+      border: 1px solid var(--border); border-radius: 16px;
+      background: var(--surface); color: var(--text);
+    }
+    dialog::backdrop { background: rgba(15, 23, 42, .45); }
+    dialog form { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    dialog h2 { margin: 0; font-size: 18px; }
+    dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+    dialog input, dialog textarea {
+      padding: 10px 12px; font-size: 16px; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    }
+    dialog textarea { min-height: 140px; resize: vertical; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .hint { font-size: 13px; color: var(--muted); margin: 0; }
+    .hint a { color: var(--accent); }
+    #setup-msg { color: var(--danger); font-size: 14px; min-height: 1em; margin: 0; }
+
+    .toast {
+      position: fixed; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+      padding: 11px 18px; border-radius: 10px; background: #0f172a; color: #fff; font-size: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .25); max-width: calc(100vw - 32px); z-index: 20;
+    }
+
+    @media (min-width: 700px) {
+      header { padding: 18px 32px; }
+      main { padding-top: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a id="back" href="../">←</a>
+    <h1>To do list</h1>
+    <button class="icon-btn" id="btn-sync" title="Synchroniser maintenant" aria-label="Synchroniser maintenant">⟳</button>
+    <button class="icon-btn" id="btn-settings" title="Réglages" aria-label="Réglages" hidden>⚙</button>
+  </header>
+
+  <main>
+    <div id="banner"></div>
+
+    <form id="add" autocomplete="off">
+      <input id="new-title" placeholder="Nouvelle tâche…" maxlength="300" aria-label="Titre de la nouvelle tâche">
+      <button class="btn primary" type="submit">Ajouter</button>
+    </form>
+
+    <div class="toolbar">
+      <span id="count"></span>
+      <label>Trier
+        <select id="sort">
+          <option value="manual">Mon ordre</option>
+          <option value="date-desc">Date (récentes d'abord)</option>
+          <option value="date-asc">Date (anciennes d'abord)</option>
+          <option value="name-asc">Nom (A → Z)</option>
+          <option value="name-desc">Nom (Z → A)</option>
+        </select>
+      </label>
+    </div>
+
+    <ul class="tasks" id="list"></ul>
+    <p class="empty-msg" id="empty" hidden>Rien à faire pour l'instant. Ajoutez une tâche ci-dessus.</p>
+
+    <button class="section-title" id="done-toggle" hidden></button>
+    <ul class="tasks" id="done-list" hidden></ul>
+
+    <p class="sync-info" id="sync-info"></p>
+  </main>
+
+  <!-- Modifier une tâche -->
+  <dialog id="edit">
+    <form method="dialog" id="edit-form">
+      <h2>Modifier la tâche</h2>
+      <label>Titre <input id="e-title" required maxlength="300"></label>
+      <label>Date <input id="e-date" type="date" required></label>
+      <label>Description <textarea id="e-desc" placeholder="Détails, adresse, matériel…"></textarea></label>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="e-cancel">Annuler</button>
+        <button class="btn primary" type="submit">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Réglages (téléphone uniquement) -->
+  <dialog id="setup">
+    <form id="setup-form">
+      <h2>Relier au dépôt privé</h2>
+      <p class="hint">Même dépôt et même clé que la page Manques (voir GUIDE-TELEPHONE.md de la Gestion du stock).</p>
+      <label>Dépôt privé <input id="s-repo" placeholder="Electricab/stock-donnees" required autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label>Clé d'accès <span id="s-token-state"></span>
+        <input id="s-token" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <p id="setup-msg"></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="s-cancel">Annuler</button>
+        <button class="btn primary" type="submit" id="s-save">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    const ON_PC = ['localhost', '127.0.0.1'].includes(location.hostname);
+    const FILE = 'todo.json';
+
+    const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+    const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage plein ou bloqué */ } };
+
+    // Sur le téléphone, la clé saisie pour la page Manques sert aussi ici (même dépôt privé)
+    let config = ON_PC ? {} : (load('todo-config', null) || load('manque-config', {}));
+    let items = load('todo-items', []);       // toutes les tâches, y compris supprimées (pour propager la suppression)
+    let syncedAt = load('todo-synced-at', null);
+    let dirty = load('todo-dirty', false);    // modifications pas encore envoyées
+    let sortMode = load('todo-sort', 'manual');
+    let showDone = load('todo-show-done', false);
+    let openId = null;                        // tâche dépliée (description visible)
+    let editId = null;
+    let rev = 0;                              // compteur de modifications locales
+
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const nowIso = () => new Date().toISOString();
+    const pad = n => String(n).padStart(2, '0');
+    const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+    const newId = () => crypto.randomUUID?.() ?? ([1e7] + -1e3 + -4e3 + -8e3 + -1e11)
+      .replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+    function fmtDay(ymd) {
+      if (!ymd) return '';
+      const [y, m, d] = ymd.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      const opts = { day: 'numeric', month: 'short' };
+      if (y !== new Date().getFullYear()) opts.year = 'numeric';
+      return date.toLocaleDateString('fr-FR', opts);
+    }
+    const fmtTime = iso => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+    function toast(msg) {
+      const t = $('#toast');
+      t.textContent = msg; t.hidden = false;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => (t.hidden = true), 2800);
+    }
+
+    // ---------- Enregistrement local ----------
+    function persist() {
+      save('todo-items', items);
+      save('todo-dirty', dirty);
+    }
+
+    function change(item, fields) {
+      Object.assign(item, fields, { updated_at: nowIso() });
+      dirty = true; rev++;
+      persist();
+      render();
+      syncSoon();
+    }
+
+    // ---------- GitHub ----------
+    const b64ToText = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+    const textToB64 = s => { let bin = ''; new TextEncoder().encode(s).forEach(b => (bin += String.fromCharCode(b))); return btoa(bin); };
+    const ready = () => ON_PC || !!(config.repo && config.token);
+
+    async function gh(method, body) {
+      const url = ON_PC ? `/api/github/${FILE}` : `https://api.github.com/repos/${config.repo}/contents/${FILE}`;
+      const headers = ON_PC ? {} : { Authorization: `Bearer ${config.token}`, Accept: 'application/vnd.github+json' };
+      if (body) headers['Content-Type'] = 'application/json';
+      const res = await fetch(url, { method, cache: 'no-store', headers, body: body ? JSON.stringify(body) : undefined });
+      if (method === 'GET' && res.status === 404) return null;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error
+          || (res.status === 401 ? 'Clé refusée par GitHub (invalide ou expirée)'
+          : res.status === 404 ? 'Dépôt introuvable, ou clé sans accès à ce dépôt'
+          : res.status === 403 ? 'Accès refusé : la clé doit avoir « Contents : Read and write »'
+          : `GitHub : ${data.message || res.status}`));
+        err.status = res.status;
+        err.offline = !!data.offline;
+        throw err;
+      }
+      return data;
+    }
+
+    async function getRemote() {
+      const d = await gh('GET');
+      return d ? { json: JSON.parse(b64ToText(d.content)), sha: d.sha } : { json: null, sha: undefined };
+    }
+
+    // Pour chaque tâche, la version modifiée le plus récemment l'emporte
+    function merge(a, b) {
+      const byId = new Map();
+      for (const i of [...a, ...b]) {
+        const cur = byId.get(i.id);
+        if (!cur || String(i.updated_at) > String(cur.updated_at)) byId.set(i.id, i);
+      }
+      return [...byId.values()].sort((x, y) => x.id.localeCompare(y.id));
+    }
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+    let syncing = false, again = false, syncTimer;
+    const syncSoon = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => sync({ quiet: true }), 1500); };
+
+    async function sync({ quiet = false } = {}) {
+      if (!ready()) return;
+      if (syncing) { again = true; return; }
+      syncing = true; again = false;
+      const startRev = rev;
+      setSyncInfo('Synchronisation…');
+      try {
+        let done = false;
+        // Jusqu'à 3 essais si un autre appareil écrit au même moment (conflit de version)
+        for (let attempt = 0; attempt < 3 && !done; attempt++) {
+          const remote = await getRemote();
+          const remoteItems = merge([], remote.json?.items || []);
+          const merged = merge(remoteItems, items);
+          if (remote.json && same(remoteItems, merged)) { done = merged; break; }
+          try {
+            await gh('PUT', {
+              message: `${ON_PC ? 'PC' : 'Téléphone'} : mise à jour de la To do list`,
+              sha: remote.sha,
+              content: textToB64(JSON.stringify({ version: 1, items: merged }, null, 1) + '\n'),
+            });
+            done = merged;
+          } catch (e) {
+            if (e.status !== 409 && e.status !== 422) throw e;
+          }
+        }
+        if (!done) throw new Error('Conflit avec un autre appareil, nouvel essai dans un instant');
+        // Les modifications faites pendant la synchronisation sont gardées (plus récentes)
+        items = merge(items, done);
+        if (rev === startRev) dirty = false;
+        syncedAt = nowIso();
+        save('todo-synced-at', syncedAt);
+        persist();
+        setBanner('');
+      } catch (e) {
+        // TypeError = la requête n'a pas pu partir (pas de réseau, serveur injoignable)
+        const offline = navigator.onLine === false || e instanceof TypeError || e.offline;
+        setBanner(offline
+          ? 'Pas de connexion : vos modifications sont gardées sur cet appareil et partiront dès que possible.'
+          : e.message, offline ? 'warn' : 'error');
+        if (!quiet) toast(offline ? 'Pas de connexion' : e.message);
+      } finally {
+        syncing = false;
+        render();
+        if (again || (dirty && rev !== startRev)) syncSoon();
+      }
+    }
+
+    function setBanner(msg, kind = 'warn') {
+      $('#banner').innerHTML = msg ? `<div class="banner ${kind}">${esc(msg)}</div>` : '';
+    }
+    function setSyncInfo(text) { $('#sync-info').textContent = text; }
+
+    // ---------- Tri ----------
+    const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+    const byPosition = (a, b) => (a.position - b.position) || String(a.created_at).localeCompare(String(b.created_at));
+    const SORTS = {
+      'manual': byPosition,
+      'date-desc': (a, b) => String(b.date).localeCompare(String(a.date)) || String(b.created_at).localeCompare(String(a.created_at)),
+      'date-asc': (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.created_at).localeCompare(String(b.created_at)),
+      'name-asc': (a, b) => collator.compare(a.title, b.title),
+      'name-desc': (a, b) => collator.compare(b.title, a.title),
+    };
+    const live = () => items.filter(i => !i.deleted);
+    const openTasks = () => live().filter(i => !i.done).sort(SORTS[sortMode] || byPosition);
+    const doneTasks = () => live().filter(i => i.done).sort(sortMode === 'manual'
+      ? (a, b) => String(b.done_at).localeCompare(String(a.done_at)) // dernières réalisées en haut
+      : SORTS[sortMode]);
+
+    // ---------- Affichage ----------
+    function taskHtml(t, i, list) {
+      const isOpen = t.id === openId;
+      const manual = sortMode === 'manual' && !t.done;
+      return `
+        <li class="task ${t.done ? 'done' : ''} ${isOpen ? 'open' : ''}" data-id="${esc(t.id)}">
+          <div class="row">
+            <button class="check" data-act="toggle" aria-label="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}" title="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}">✓</button>
+            <button class="main" data-act="expand" aria-expanded="${isOpen}">
+              <span class="title">${esc(t.title)}${t.description ? ' <span class="has-desc" title="A une description">📝</span>' : ''}</span>
+              <span class="date">${esc(fmtDay(t.date))}</span>
+            </button>
+            ${manual ? `<span class="moves">
+              <button data-act="up" aria-label="Monter" title="Monter" ${i === 0 ? 'disabled' : ''}>▲</button>
+              <button data-act="down" aria-label="Descendre" title="Descendre" ${i === list.length - 1 ? 'disabled' : ''}>▼</button>
+            </span>` : ''}
+          </div>
+          ${isOpen ? `<div class="details">
+            <p class="desc ${t.description ? '' : 'empty'}">${t.description ? esc(t.description) : 'Pas de description'}</p>
+            <div class="meta">Ajoutée le ${esc(fmtTime(t.created_at))}${t.done && t.done_at ? ` · réalisée le ${esc(fmtTime(t.done_at))}` : ''}</div>
+            <div class="actions">
+              <button class="btn" data-act="edit">Modifier</button>
+              <button class="btn danger" data-act="delete">Supprimer</button>
+            </div>
+          </div>` : ''}
+        </li>`;
+    }
+
+    function render() {
+      const open = openTasks(), done = doneTasks();
+      $('#list').innerHTML = open.map((t, i) => taskHtml(t, i, open)).join('');
+      $('#list').hidden = !open.length;
+      $('#empty').hidden = open.length > 0;
+      $('#count').textContent = open.length ? `${open.length} à faire` : '';
+      $('#done-toggle').hidden = !done.length;
+      $('#done-toggle').textContent = `${showDone ? '▾' : '▸'} Réalisées (${done.length})`;
+      $('#done-list').hidden = !done.length || !showDone;
+      $('#done-list').innerHTML = showDone ? done.map((t, i) => taskHtml(t, i, done)).join('') : '';
+      $('#sort').value = sortMode;
+      $('#btn-settings').hidden = ON_PC;
+      if (!syncing) {
+        setSyncInfo(!ready() ? 'Pas encore reliée au dépôt : touchez ⚙ pour la relier.'
+          : [syncedAt ? `Synchronisée le ${fmtTime(syncedAt)}` : 'Jamais synchronisée',
+             dirty ? 'modifications en attente d\'envoi' : ''].filter(Boolean).join(' · '));
+      }
+    }
+
+    // ---------- Actions ----------
+    $('#add').addEventListener('submit', e => {
+      e.preventDefault();
+      const title = $('#new-title').value.trim();
+      if (!title) return $('#new-title').focus();
+      const positions = items.filter(i => !i.deleted && !i.done).map(i => i.position);
+      const now = nowIso();
+      const t = {
+        id: newId(), title, description: '', date: today(), done: false, done_at: null,
+        // En haut de « Mon ordre » ; la petite part aléatoire évite deux positions égales entre appareils
+        position: Math.min(0, ...positions) - 1 - Math.random() / 2,
+        created_at: now, updated_at: now, deleted: false,
+      };
+      items.push(t);
+      $('#new-title').value = '';
+      change(t, {});
+    });
+
+    function find(id) { return items.find(i => i.id === id); }
+
+    function move(t, dir) {
+      const list = openTasks();
+      const idx = list.indexOf(t);
+      const other = list[idx + dir];
+      if (!other) return;
+      if (t.position === other.position) {
+        // Positions égales (rare) : on renumérote la liste avant d'échanger
+        list.forEach((x, n) => { if (x.position !== n) { x.position = n; x.updated_at = nowIso(); } });
+      }
+      const p = t.position;
+      t.position = other.position;
+      change(other, { position: p });
+      change(t, {});
+    }
+
+    function onListClick(e) {
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      const t = find(btn.closest('.task').dataset.id);
+      if (!t) return;
+      switch (btn.dataset.act) {
+        case 'toggle':
+          change(t, t.done ? { done: false, done_at: null } : { done: true, done_at: nowIso() });
+          if (t.done) toast('Tâche réalisée ✓');
+          break;
+        case 'expand':
+          openId = openId === t.id ? null : t.id;
+          render();
+          break;
+        case 'up': move(t, -1); break;
+        case 'down': move(t, 1); break;
+        case 'edit': openEdit(t); break;
+        case 'delete':
+          if (confirm(`Supprimer la tâche « ${t.title} » ?`)) { openId = null; change(t, { deleted: true }); toast('Tâche supprimée'); }
+          break;
+      }
+    }
+    $('#list').addEventListener('click', onListClick);
+    $('#done-list').addEventListener('click', onListClick);
+
+    $('#done-toggle').addEventListener('click', () => { showDone = !showDone; save('todo-show-done', showDone); render(); });
+    $('#sort').addEventListener('change', e => { sortMode = e.target.value; save('todo-sort', sortMode); render(); });
+    $('#btn-sync').addEventListener('click', () => sync());
+
+    // ---------- Modifier ----------
+    function openEdit(t) {
+      editId = t.id;
+      $('#e-title').value = t.title;
+      $('#e-date').value = t.date || today();
+      $('#e-desc').value = t.description || '';
+      $('#edit').showModal();
+    }
+    $('#e-cancel').addEventListener('click', () => $('#edit').close());
+    $('#edit-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const t = find(editId);
+      const title = $('#e-title').value.trim();
+      if (!t || !title) return;
+      change(t, { title, date: $('#e-date').value || t.date, description: $('#e-desc').value.trim() });
+      $('#edit').close();
+      toast('Tâche modifiée');
+    });
+
+    // ---------- Réglages (téléphone) ----------
+    function openSetup() {
+      $('#s-repo').value = config.repo || 'Electricab/stock-donnees';
+      $('#s-token').value = '';
+      $('#s-token').required = !config.token;
+      $('#s-token-state').textContent = config.token ? '(enregistrée — laisser vide pour la garder)' : '';
+      $('#setup-msg').textContent = '';
+      $('#setup').showModal();
+    }
+    $('#btn-settings').addEventListener('click', openSetup);
+    $('#s-cancel').addEventListener('click', () => $('#setup').close());
+    $('#setup-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const repo = $('#s-repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
+      const token = $('#s-token').value.trim() || config.token;
+      const previous = config;
+      config = { repo, token };
+      $('#setup-msg').textContent = 'Connexion à GitHub…';
+      $('#s-save').disabled = true;
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}`, {
+          cache: 'no-store', headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        });
+        if (res.status === 401) throw new Error('Clé refusée par GitHub (invalide ou expirée)');
+        if (!res.ok) throw new Error('Dépôt introuvable, ou clé sans accès à ce dépôt');
+        const info = await res.json();
+        if (info.permissions && !info.permissions.push) throw new Error('La clé n\'a pas le droit d\'écrire (« Contents : Read and write »)');
+        save('todo-config', config);
+        $('#setup').close();
+        toast('To do list reliée');
+        sync({ quiet: true });
+      } catch (err) {
+        config = previous;
+        $('#setup-msg').textContent = err.message;
+      } finally {
+        $('#s-save').disabled = false;
+      }
+    });
+
+    // ---------- Démarrage ----------
+    if (ON_PC) {
+      $('#back').href = '/';
+      $('#back').textContent = '← Plateforme';
+      new EventSource('/api/presence'); // garde la plateforme lancée tant que la page est ouverte
+    } else {
+      $('#back').textContent = '← Mes applis';
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    // Une autre fenêtre de la To do list sur le même appareil a modifié la liste
+    window.addEventListener('storage', e => {
+      if (e.key === 'todo-items') { items = load('todo-items', []); render(); }
+    });
+    window.addEventListener('online', () => sync({ quiet: true }));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync({ quiet: true }); });
+    setInterval(() => { if (!document.hidden) sync({ quiet: true }); }, 60 * 1000);
+
+    render();
+    if (!ready()) openSetup(); else sync({ quiet: true });
+  </script>
+</body>
+</html>
