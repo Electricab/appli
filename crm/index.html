@@ -481,9 +481,13 @@
     const statutFilter = new Set(load('crm-statut-filter', []));
     // Nom d'une note : celui qu'on lui a donné, sinon « Visite pré-devis du … »
     const docTitle = d => d.titre?.trim() || `${visitLabel(d)} du ${fmtDay(d.visit_date)}`;
-    const askTitre = cur => {
-      const v = prompt('Nom de la note (laisser vide pour le nom automatique) :', cur || '');
-      return v === null ? null : v.trim().slice(0, 120);
+    // La case contient le nom affiché (donné ou automatique), à modifier ; vidée = retour au nom automatique.
+    // Renvoie null si annulé ou inchangé.
+    const askTitre = d => {
+      const current = docTitle(d);
+      const v = prompt('Nom de la note (vider la case pour revenir au nom automatique) :', current);
+      if (v === null || v.trim() === current) return null;
+      return v.trim().slice(0, 120);
     };
     const visitLabel = d => VISIT_TYPES[d.visit_type] || VISIT_TYPES.pre_devis;
     const renderTypeSeg = (el, type) => el.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === (type || 'pre_devis')));
@@ -995,7 +999,7 @@
       $('#note-aff').textContent = `${TYPE_ICONS[typeOf(m)]} ${docTitle(m)} · ${affaireLabel(docAffIds(m))}`;
     }
     $('#note-title-btn').addEventListener('click', () => {
-      const v = askTitre(note.meta.titre);
+      const v = askTitre({ ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date });
       if (v === null || v === (note.meta.titre || '')) return;
       note.meta.titre = v;
       renderNoteHeader();
@@ -1793,7 +1797,7 @@
     });
     $('#v-rename').addEventListener('click', async () => {
       const meta = cache.docs.find(d => d.id === state.docId);
-      const v = askTitre(meta.titre);
+      const v = askTitre(meta);
       if (v === null || v === (meta.titre || '')) return;
       $('#v-title').textContent = docTitle({ ...meta, titre: v });
       await patchViewedDoc({ titre: v });
