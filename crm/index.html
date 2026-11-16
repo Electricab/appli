@@ -346,6 +346,7 @@
       <div class="note-row">
         <button class="icon-btn" id="note-back" aria-label="Retour">←</button>
         <button class="tool wide" id="note-aff-btn" aria-label="Changer d'affaire">📁</button>
+        <button class="tool wide" id="note-title-btn" aria-label="Renommer la note">✎</button>
         <input type="date" id="note-date">
         <label class="done-toggle"><input type="checkbox" id="note-done"> Traitée</label>
       </div>
@@ -387,6 +388,7 @@
     <header class="bar">
       <button class="icon-btn" data-back aria-label="Retour">←</button>
       <h1 id="v-title"></h1>
+      <button class="icon-btn" id="v-rename" aria-label="Renommer la note">✎</button>
     </header>
     <div class="type-seg big" id="v-type">
       <button type="button" data-v="pre_devis">Visite pré-devis</button>
@@ -472,6 +474,12 @@
     const statutOf = a => AFFAIRE_STATUTS[a.statut] ? a.statut : 'etude';
     // Statuts choisis dans le filtre de la liste, gardés sur ce téléphone ; aucun choix = tous les clients
     const statutFilter = new Set(load('crm-statut-filter', []));
+    // Nom d'une note : celui qu'on lui a donné, sinon « Visite pré-devis du … »
+    const docTitle = d => d.titre?.trim() || `${visitLabel(d)} du ${fmtDay(d.visit_date)}`;
+    const askTitre = cur => {
+      const v = prompt('Nom de la note (laisser vide pour le nom automatique) :', cur || '');
+      return v === null ? null : v.trim().slice(0, 120);
+    };
     const visitLabel = d => VISIT_TYPES[d.visit_type] || VISIT_TYPES.pre_devis;
     const renderTypeSeg = (el, type) => el.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === (type || 'pre_devis')));
     const PAYS = [['FR', 'France'], ['BE', 'Belgique'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['MC', 'Monaco'],
@@ -851,7 +859,8 @@
         <li class="tap${doc.done ? ' done' : ''}" data-id="${esc(doc.id)}">
           <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
           <div class="grow">
-            <div class="title">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
+            <div class="title">${esc(docTitle(doc))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
+            ${doc.titre ? `<div class="muted">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}</div>` : ''}
             <div class="muted">${withAffaire ? (docAffIds(doc).map(id => `<span class="aff-tag">${esc(getAffaire(id)?.nom || 'Affaire')}</span> `).join('') || '<span class="aff-tag">Sans affaire</span> ') : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
@@ -969,11 +978,27 @@
         if (sameIds(ids, docAffIds(note.meta))) return;
         note.meta.affaire_ids = ids;
         note.meta.affaire_id = ids[0];
-        $('#note-aff').textContent = affaireLabel(ids);
+        renderNoteHeader();
         changed();
         toast(`Note rattachée à : ${affaireNames(ids)}`);
       });
     });
+
+    // En haut de la page de notes : nom de la note et affaires
+    function renderNoteHeader() {
+      const m = { ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date };
+      $('#note-aff').textContent = `${docTitle(m)} · ${affaireLabel(docAffIds(m))}`;
+    }
+    $('#note-title-btn').addEventListener('click', () => {
+      const v = askTitre(note.meta.titre);
+      if (v === null || v === (note.meta.titre || '')) return;
+      note.meta.titre = v;
+      renderNoteHeader();
+      changed();
+      toast('Note renommée');
+    });
+    $('#note-date').addEventListener('change', () => renderNoteHeader());
+    $('#note-type').addEventListener('click', () => setTimeout(renderNoteHeader));
 
     // Note texte du PC
     $('#v-aff').addEventListener('click', () => {
@@ -1111,7 +1136,7 @@
       $('#note-date').value = meta.visit_date;
       $('#note-done').checked = !!meta.done;
       renderTypeSeg($('#note-type'), meta.visit_type);
-      $('#note-aff').textContent = affaireLabel(docAffIds(meta));
+      renderNoteHeader();
       note.sel = null;
       $('#note-state').textContent = '';
       show('note', { docId: id });
@@ -1729,7 +1754,7 @@
         } catch { /* hors connexion */ }
       }
       if (!rec) { toast('Document pas encore disponible sur ce téléphone (connexion nécessaire)'); return; }
-      $('#v-title').textContent = `${visitLabel(meta)} du ${fmtDay(meta.visit_date)}`;
+      $('#v-title').textContent = docTitle(meta);
       $('#v-body').innerHTML = sanitizeHtml(rec.body) || '<p class="muted">Document vide.</p>';
       for (const img of $$('#v-body img[data-photo]')) {
         photoData(img.dataset.photo).then(data => { if (data) img.src = `data:image/jpeg;base64,${data}`; }).catch(() => {});
@@ -1758,8 +1783,16 @@
       if (!v) return;
       renderTypeSeg($('#v-type'), v);
       const meta = cache.docs.find(d => d.id === state.docId);
-      $('#v-title').textContent = `${VISIT_TYPES[v]} du ${fmtDay(meta.visit_date)}`;
+      $('#v-title').textContent = docTitle({ ...meta, visit_type: v });
       await patchViewedDoc({ visit_type: v });
+    });
+    $('#v-rename').addEventListener('click', async () => {
+      const meta = cache.docs.find(d => d.id === state.docId);
+      const v = askTitre(meta.titre);
+      if (v === null || v === (meta.titre || '')) return;
+      $('#v-title').textContent = docTitle({ ...meta, titre: v });
+      await patchViewedDoc({ titre: v });
+      toast('Note renommée');
     });
 
     // ---------- Réglages ----------
