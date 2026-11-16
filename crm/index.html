@@ -203,6 +203,11 @@
     ul.list li .aff-ico { font-size: 20px; flex: none; }
     .aff-tag { display: inline-block; font-size: 0.75rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 0 6px; }
     .html-doc img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
+    .rte-bar { position: sticky; top: 0; z-index: 3; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 6px 0; background: var(--bg); }
+    .rte-bar button { font: inherit; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .html-doc[contenteditable]:empty::before { content: attr(data-placeholder); color: var(--muted); }
+    .html-doc[contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+    .html-doc { min-height: 40vh; }
     .html-doc {background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
     .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
 
@@ -399,8 +404,18 @@
     </div>
     <button type="button" class="btn secondary aff-move" id="v-aff"></button>
     <label class="done-toggle big"><input type="checkbox" id="v-done"> Visite traitée</label>
-    <div class="html-doc" id="v-body"></div>
-    <p class="muted">Document créé sur le PC : il se modifie dans le CRM du PC.</p>
+    <div class="rte-bar" id="v-tools">
+      <button type="button" data-cmd="bold" aria-label="Gras"><b>G</b></button>
+      <button type="button" data-cmd="italic" aria-label="Italique"><i>I</i></button>
+      <button type="button" data-cmd="underline" aria-label="Souligné"><u>S</u></button>
+      <button type="button" data-cmd="insertUnorderedList" aria-label="Liste à puces">•</button>
+      <button type="button" data-cmd="insertOrderedList" aria-label="Liste numérotée">1.</button>
+      <button type="button" data-color="foreColor" data-value="#dc2626" aria-label="Texte rouge"><span style="color:#dc2626;font-weight:700">A</span></button>
+      <button type="button" data-color="hiliteColor" data-value="#fef08a" aria-label="Surligner"><span style="background:#fef08a;padding:0 4px">A</span></button>
+      <button type="button" data-cmd="removeFormat" aria-label="Effacer la mise en forme">⌫</button>
+    </div>
+    <div class="html-doc" id="v-body" contenteditable="true" spellcheck="true" data-placeholder="Écrivez la note…"></div>
+    <p class="muted" id="v-state"></p>
   </section>
 
   <!-- ===== Nouvelle visite depuis la fiche : choix de l'affaire ===== -->
@@ -743,6 +758,7 @@
     // Chaque écran est une entrée d'historique : le bouton retour d'Android revient à l'écran précédent
     function show(screen, params = {}, { push = true } = {}) {
       if (state.screen === 'note' && screen !== 'note') leaveNote();
+      if (state.screen === 'view' && screen !== 'view' && htmlDoc.dirty) saveHtml.flush().then(() => syncSoon(500));
       Object.assign(state, { screen, ...params });
       $$('.screen').forEach(s => (s.hidden = s.id !== screen));
       if (push) history.pushState({ ...state }, '');
@@ -870,7 +886,7 @@
           <div class="grow">
             <div class="title">${esc(docTitle(doc))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
             ${doc.titre ? `<div class="muted">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}</div>` : ''}
-            <div class="muted">${withAffaire ? (docAffIds(doc).map(id => `<span class="aff-tag">${esc(getAffaire(id)?.nom || 'Affaire')}</span> `).join('') || '<span class="aff-tag">Sans affaire</span> ') : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte (PC)'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
+            <div class="muted">${withAffaire ? (docAffIds(doc).map(id => `<span class="aff-tag">${esc(getAffaire(id)?.nom || 'Affaire')}</span> `).join('') || '<span class="aff-tag">Sans affaire</span> ') : ''}${doc.format === 'ink' ? 'Notes au stylet' : 'Texte'} · ${doc.source === 'phone' ? '📱' : '💻'}</div>
           </div>
         </li>`).join('');
       list.hidden = !docs.length;
@@ -1764,7 +1780,9 @@
       }
       if (!rec) { toast('Document pas encore disponible sur ce téléphone (connexion nécessaire)'); return; }
       $('#v-title').textContent = docTitle(meta);
-      $('#v-body').innerHTML = sanitizeHtml(rec.body) || '<p class="muted">Document vide.</p>';
+      htmlDoc.id = meta.id; htmlDoc.dirty = false;
+      $('#v-state').textContent = '';
+      $('#v-body').innerHTML = sanitizeHtml(rec.body);
       for (const img of $$('#v-body img[data-photo]')) {
         photoData(img.dataset.photo).then(data => { if (data) img.src = `data:image/jpeg;base64,${data}`; }).catch(() => {});
       }
@@ -1773,6 +1791,44 @@
       $('#v-aff').textContent = `${affaireLabel(docAffIds(meta))} — changer`;
       show('view', { docId: meta.id });
     }
+
+    // ---------- Note texte : modifiable aussi sur le téléphone ----------
+    // Le contenu est nettoyé à l'enregistrement : les photos n'y gardent que leur identifiant (pas l'image elle-même).
+    const htmlDoc = { id: null, dirty: false };
+    document.execCommand('styleWithCSS', false, true);
+    const saveHtml = debounceAsync(async () => {
+      if (!htmlDoc.dirty || !htmlDoc.id) return;
+      htmlDoc.dirty = false;
+      const id = htmlDoc.id, now = nowIso();
+      const rec = await idb.get(id);
+      await idb.put({ ...(rec || {}), id, updated_at: now, body: sanitizeHtml($('#v-body').innerHTML) });
+      cache.docs = cache.docs.map(d => d.id === id ? { ...d, updated_at: now } : d);
+      save(CACHE_KEY, cache);
+      $('#v-state').textContent = `✓ Enregistré à ${fmtTime(now)}`;
+      syncSoon(5000);
+    }, 800);
+    function htmlChanged() {
+      htmlDoc.dirty = true;
+      $('#v-state').textContent = '…';
+      saveHtml();
+    }
+    $('#v-body').addEventListener('input', htmlChanged);
+    $('#v-body').addEventListener('paste', e => {
+      const html = e.clipboardData.getData('text/html');
+      if (!html) return;
+      e.preventDefault();
+      document.execCommand('insertHTML', false, sanitizeHtml(html));
+    });
+    // Les boutons ne prennent pas le focus : la sélection dans le texte est gardée
+    $('#v-tools').addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });
+    $('#v-tools').addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      $('#v-body').focus();
+      if (b.dataset.cmd) document.execCommand(b.dataset.cmd, false, null);
+      else document.execCommand(b.dataset.color, false, b.dataset.value);
+      htmlChanged();
+    });
 
     // Case « traitée » d'un document du PC : le contenu est déjà sur le téléphone, il repart avec
     async function patchViewedDoc(patch) {
@@ -1855,7 +1911,10 @@
     if (config.repo && config.token) sync();
     window.addEventListener('online', () => sync());
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { if (state.screen === 'note') saveNote.flush()?.then(() => sync()); }
+      if (document.hidden) {
+        if (state.screen === 'note') saveNote.flush()?.then(() => sync());
+        if (state.screen === 'view' && htmlDoc.dirty) saveHtml.flush().then(() => sync());
+      }
       else if (state.screen !== 'note') sync();
     });
     setInterval(() => { if (!document.hidden && state.screen !== 'note') sync(); }, 60 * 1000);
