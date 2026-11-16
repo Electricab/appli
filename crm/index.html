@@ -191,6 +191,9 @@
     .st-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 0 12px; }
     .st-seg button { font: inherit; font-size: 0.78rem; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
     .st-seg button.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 700; }
+    .type-ico { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-size: 16px; line-height: 1; flex: none; }
+    .type-ico.pre_devis { background: #dbeafe; box-shadow: inset 0 0 0 2px #1d4ed8; }
+    .type-ico.realisation { background: #dcfce7; box-shadow: inset 0 0 0 2px #15803d; }
     .note-aff { position: absolute; left: 8px; top: 6px; font-size: 0.75rem; color: #0f766e; pointer-events: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .aff-move { margin-bottom: 12px; text-align: left; }
     ul.list li.current { background: var(--accent-soft); }
@@ -352,8 +355,8 @@
       </div>
       <div class="note-row">
         <div class="type-seg" id="note-type">
-          <button type="button" data-v="pre_devis">Visite pré-devis</button>
-          <button type="button" data-v="realisation">Réalisation</button>
+          <button type="button" data-v="pre_devis">📐 Pré-devis</button>
+          <button type="button" data-v="realisation">🛠️ Réalisation</button>
         </div>
         <button class="tool wide" id="tool-photo" aria-label="Ajouter une photo">📷</button>
         <button class="tool wide" id="tool-finger" aria-label="Écrire au doigt">☝</button>
@@ -391,8 +394,8 @@
       <button class="icon-btn" id="v-rename" aria-label="Renommer la note">✎</button>
     </header>
     <div class="type-seg big" id="v-type">
-      <button type="button" data-v="pre_devis">Visite pré-devis</button>
-      <button type="button" data-v="realisation">Réalisation</button>
+      <button type="button" data-v="pre_devis">📐 Visite pré-devis</button>
+      <button type="button" data-v="realisation">🛠️ Réalisation</button>
     </div>
     <button type="button" class="btn secondary aff-move" id="v-aff"></button>
     <label class="done-toggle big"><input type="checkbox" id="v-done"> Visite traitée</label>
@@ -470,6 +473,8 @@
       .toUpperCase().replace(/Œ/g, 'OE').replace(/Æ/g, 'AE').replace(/[^A-Z0-9]/g, '').slice(0, 8);
     const CATEGORIES = { prospect: 'Prospect', client: 'Client' };
     const VISIT_TYPES = { pre_devis: 'Visite pré-devis', realisation: 'Réalisation' };
+    const TYPE_ICONS = { pre_devis: '📐', realisation: '🛠️' };
+    const typeOf = d => TYPE_ICONS[d.visit_type] ? d.visit_type : 'pre_devis';
     const AFFAIRE_STATUTS = { etude: 'Étude', attente: 'Attente réponse', accepte: 'Accepté', realise: 'Réalisé' };
     const statutOf = a => AFFAIRE_STATUTS[a.statut] ? a.statut : 'etude';
     // Statuts choisis dans le filtre de la liste, gardés sur ce téléphone ; aucun choix = tous les clients
@@ -857,7 +862,7 @@
     function renderDocList(list, empty, docs, withAffaire) {
       list.innerHTML = docs.map(doc => `
         <li class="tap${doc.done ? ' done' : ''}" data-id="${esc(doc.id)}">
-          <span class="ico">${doc.format === 'ink' ? '✍️' : '📝'}</span>
+          <span class="type-ico ${typeOf(doc)}">${TYPE_ICONS[typeOf(doc)]}</span>
           <div class="grow">
             <div class="title">${esc(docTitle(doc))}${doc.done ? ' <span class="badge client">✓ Traitée</span>' : ''}</div>
             ${doc.titre ? `<div class="muted">${esc(visitLabel(doc))} du ${esc(fmtDay(doc.visit_date))}</div>` : ''}
@@ -987,7 +992,7 @@
     // En haut de la page de notes : nom de la note et affaires
     function renderNoteHeader() {
       const m = { ...note.meta, visit_date: $('#note-date').value || note.meta.visit_date };
-      $('#note-aff').textContent = `${docTitle(m)} · ${affaireLabel(docAffIds(m))}`;
+      $('#note-aff').textContent = `${TYPE_ICONS[typeOf(m)]} ${docTitle(m)} · ${affaireLabel(docAffIds(m))}`;
     }
     $('#note-title-btn').addEventListener('click', () => {
       const v = askTitre(note.meta.titre);
