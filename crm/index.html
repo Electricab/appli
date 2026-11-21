@@ -185,10 +185,13 @@
     .st-chip[data-s="attente"], .st.attente, .st-seg [data-s="attente"] { --c: #b45309; --b: #fef3c7; }
     .st-chip[data-s="accepte"], .st.accepte, .st-seg [data-s="accepte"] { --c: #15803d; --b: #dcfce7; }
     .st-chip[data-s="realise"], .st.realise, .st-seg [data-s="realise"] { --c: #4b5563; --b: #e5e7eb; }
+    .st-chip[data-s="refuse"], .st.refuse, .st-seg [data-s="refuse"] { --c: #b91c1c; --b: #fee2e2; }
     .st-filters { flex-wrap: wrap; }
     .st-chip.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 600; }
     .st { display: inline-block; font-size: 0.72rem; font-weight: 600; color: var(--c); background: var(--b); border-radius: 8px; padding: 0 6px; margin: 2px 3px 0 0; }
-    .st-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 0 12px; }
+    .st-seg { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 0 0 12px; }
+    .st-seg button { grid-column: span 2; }
+    .st-seg button:nth-child(n+4) { grid-column: span 3; }
     .st-seg button { font: inherit; font-size: 0.78rem; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
     .st-seg button.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 700; }
     .type-ico { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-size: 16px; line-height: 1; flex: none; }
@@ -265,6 +268,7 @@
       <button class="chip st-chip" data-s="attente">Attente</button>
       <button class="chip st-chip" data-s="accepte">Accepté</button>
       <button class="chip st-chip" data-s="realise">Réalisé</button>
+      <button class="chip st-chip" data-s="refuse">Refusé</button>
     </div>
     <ul class="list" id="clients"></ul>
     <p class="muted" id="clients-empty"></p>
@@ -302,6 +306,7 @@
       <button type="button" data-s="attente">Attente réponse</button>
       <button type="button" data-s="accepte">Accepté</button>
       <button type="button" data-s="realise">Réalisé</button>
+      <button type="button" data-s="refuse">Refusé</button>
     </div>
     <ul class="list" id="a-docs"></ul>
     <p class="muted" id="a-docs-empty">Aucune note dans cette affaire.</p>
@@ -490,7 +495,7 @@
     const VISIT_TYPES = { pre_devis: 'Visite pré-devis', realisation: 'Réalisation' };
     const TYPE_ICONS = { pre_devis: '📐', realisation: '🛠️' };
     const typeOf = d => TYPE_ICONS[d.visit_type] ? d.visit_type : 'pre_devis';
-    const AFFAIRE_STATUTS = { etude: 'Étude', attente: 'Attente réponse', accepte: 'Accepté', realise: 'Réalisé' };
+    const AFFAIRE_STATUTS = { etude: 'Étude', attente: 'Attente réponse', accepte: 'Accepté', realise: 'Réalisé', refuse: 'Refusé' };
     const statutOf = a => AFFAIRE_STATUTS[a.statut] ? a.statut : 'etude';
     // Statuts choisis dans le filtre de la liste, gardés sur ce téléphone ; aucun choix = tous les clients
     const statutFilter = new Set(load('crm-statut-filter', []));
