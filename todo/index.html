@@ -5,9 +5,20 @@
     qui ajoute la clé GitHub (le navigateur ne la voit jamais).
   - Téléphone : dépôt Electricab/appli, dossier todo/. Elle parle directement à GitHub
     avec la clé du téléphone (reprise de la page Manques si elle y est déjà).
-  Les tâches sont dans le fichier todo.json du dépôt privé, fusionnées tâche par tâche :
-  la version modifiée le plus récemment l'emporte. Chaque appareil garde une copie
-  et fonctionne sans réseau ; les modifications partent dès que la connexion revient.
+
+  Deux sortes d'éléments : « À faire » (à cocher quand c'est fait) et « Note ».
+  Chacun peut avoir un contenu, comme les notes de visite du CRM :
+  - au stylet (ink.js, même format et même éditeur que le CRM : stylos, surligneur, gomme,
+    sélection, photos et rognage) ;
+  - au clavier (texte mis en forme, photos).
+
+  Dans le dépôt privé :
+    todo.json               la liste (titre, date, type, ordre…), fusionnée élément par élément
+    todo/<id>.json          le contenu d'un élément (envoyé seulement quand il change)
+    todo/photos/<id>.jpg    les photos (envoyées une seule fois)
+  Règle de fusion : la version modifiée le plus récemment l'emporte. Chaque appareil garde une copie
+  (localStorage pour la liste, IndexedDB pour les contenus et photos) et fonctionne sans réseau.
+
   Après une modification ici, recopier ce dossier dans le dépôt appli (voir README).
 -->
 <html lang="fr">
@@ -16,7 +27,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <title>To do list</title>
-  <meta name="theme-color" content="#7c3aed">
+  <meta name="theme-color" content="#2563eb">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -27,12 +38,16 @@
       --text: #1e293b;
       --muted: #64748b;
       --border: #e2e8f0;
-      --accent: #7c3aed;
-      --accent-soft: #ede9fe;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --accent-text: #ffffff;
       --ok: #16a34a;
+      --ok-bg: #dcfce7;
+      --note: #b45309;
+      --note-bg: #fef3c7;
       --warn-bg: #fef3c7; --warn-text: #92400e;
       --err-bg: #fee2e2; --err-text: #b91c1c;
-      --danger: #b91c1c;
+      --danger: #b91c1c; --danger-bg: #fee2e2;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -41,11 +56,15 @@
         --text: #e8eaed;
         --muted: #9aa3ad;
         --border: #2d333b;
-        --accent: #a78bfa;
-        --accent-soft: #2e2546;
+        --accent: #60a5fa;
+        --accent-soft: #1e2b45;
+        --accent-text: #0f1216;
+        --ok-bg: #12301d;
+        --note: #fbbf24;
+        --note-bg: #3a2e12;
         --warn-bg: #3a2e12; --warn-text: #fcd34d;
         --err-bg: #3b1717; --err-text: #fca5a5;
-        --danger: #f87171;
+        --danger: #f87171; --danger-bg: #3b1717;
       }
     }
     * { box-sizing: border-box; }
@@ -61,18 +80,18 @@
     button, input, textarea, select { font: inherit; color: inherit; }
     button { cursor: pointer; }
 
-    header {
+    header.top {
       position: sticky; top: 0; z-index: 5;
       display: flex; align-items: center; gap: 12px;
       padding: max(14px, env(safe-area-inset-top)) 16px 14px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
     }
-    header a { color: var(--muted); text-decoration: none; font-size: 14px; white-space: nowrap; }
-    header h1 { margin: 0; font-size: 19px; flex: 1; }
+    header.top a { color: var(--muted); text-decoration: none; font-size: 14px; white-space: nowrap; }
+    header.top h1 { margin: 0; font-size: 19px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .icon-btn {
       border: 1px solid var(--border); background: var(--surface);
-      border-radius: 10px; padding: 6px 10px; font-size: 15px;
+      border-radius: 10px; padding: 6px 10px; font-size: 15px; flex: none;
     }
 
     main { max-width: 760px; margin: 0 auto; padding: 18px 16px 60px; }
@@ -81,36 +100,41 @@
     .banner.warn { background: var(--warn-bg); color: var(--warn-text); }
     .banner.error { background: var(--err-bg); color: var(--err-text); }
 
-    #add { display: flex; gap: 8px; margin-bottom: 14px; }
+    #add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
     #add input {
-      flex: 1; min-width: 0;
+      flex: 1 1 220px; min-width: 0;
       padding: 12px 14px; font-size: 16px;
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
     }
-    #add input:focus, dialog input:focus, dialog textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    #add input:focus, dialog input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .seg { display: inline-grid; grid-auto-flow: column; gap: 4px; padding: 3px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+    .seg button { border: 0; background: none; border-radius: 9px; padding: 7px 12px; font-size: 14px; white-space: nowrap; color: var(--muted); }
+    .seg button.active { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+    .seg button[data-v="note"].active { background: var(--note); color: #fff; }
     .btn {
+      display: inline-block; text-align: center;
       padding: 10px 16px; border-radius: 12px; border: 1px solid var(--border);
-      background: var(--surface); font-size: 15px; white-space: nowrap;
+      background: var(--surface); font-size: 15px; white-space: nowrap; cursor: pointer;
     }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
     .btn.danger { color: var(--danger); }
     .btn:disabled { opacity: .5; cursor: default; }
 
     .toolbar {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
       margin-bottom: 10px; font-size: 14px; color: var(--muted);
     }
+    .toolbar .right { display: flex; gap: 10px; flex-wrap: wrap; }
     .toolbar label { display: flex; align-items: center; gap: 6px; }
     .toolbar select {
       padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
     }
 
     ul.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-    .task {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-      overflow: hidden;
-    }
+    .task { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .task.type-note { border-left: 4px solid var(--note); }
     .task.open { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .task.type-note.open { border-left-color: var(--note); }
     .row { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; }
     .check {
       flex: none; width: 26px; height: 26px; border-radius: 50%;
@@ -118,6 +142,10 @@
       display: grid; place-items: center; font-size: 14px; color: transparent; padding: 0;
     }
     .task.done .check { background: var(--ok); border-color: var(--ok); color: #fff; }
+    .note-ico {
+      flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+      background: var(--note-bg); font-size: 14px; line-height: 1;
+    }
     .main {
       flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 8px 4px;
       display: flex; align-items: baseline; gap: 10px;
@@ -125,7 +153,7 @@
     .title { flex: 1; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
     .task.done .title { text-decoration: line-through; color: var(--muted); }
     .date { flex: none; font-size: 13px; color: var(--muted); white-space: nowrap; }
-    .has-desc { color: var(--muted); font-size: 12px; }
+    .has-content { font-size: 12px; margin-left: 4px; }
     .moves { flex: none; display: flex; gap: 2px; }
     .moves button {
       width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border);
@@ -133,8 +161,11 @@
     }
     .moves button:disabled { opacity: .3; cursor: default; }
     .details { padding: 0 14px 12px 46px; }
-    .desc { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
-    .desc.empty { color: var(--muted); font-style: italic; }
+    .preview { margin-bottom: 12px; cursor: pointer; }
+    .preview .html-doc { min-height: 0; max-height: 320px; overflow: hidden; padding: 10px 12px; }
+    .ink-prev { max-height: 320px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .ink-prev canvas { display: block; width: 100%; }
+    .desc.empty { color: var(--muted); font-style: italic; margin: 0 0 12px; font-size: 14px; }
     .meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .actions .btn { padding: 7px 14px; font-size: 14px; }
@@ -156,73 +187,235 @@
     dialog form { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
     dialog h2 { margin: 0; font-size: 18px; }
     dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
-    dialog input, dialog textarea {
+    dialog input {
       padding: 10px 12px; font-size: 16px; color: var(--text);
       background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
     }
-    dialog textarea { min-height: 140px; resize: vertical; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .hint { font-size: 13px; color: var(--muted); margin: 0; }
-    .hint a { color: var(--accent); }
     #setup-msg { color: var(--danger); font-size: 14px; min-height: 1em; margin: 0; }
+
+    /* ===== Contenu au clavier ===== */
+    .html-doc {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
+      line-height: 1.5; overflow-wrap: anywhere; font-size: 15px;
+    }
+    .html-doc img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
+    .html-doc h2, .html-doc h3 { margin: 12px 0 6px; }
+    .html-doc p { margin: 0 0 6px; }
+    #t-body { min-height: 50vh; }
+    #t-body:empty::before { content: attr(data-placeholder); color: var(--muted); }
+    #t-body:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+    .rte-bar {
+      position: sticky; top: 0; z-index: 3; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+      gap: 4px; padding: 8px 0; background: var(--bg);
+    }
+    .rte-bar button { height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); padding: 0; }
+    #text-screen main { padding-top: 6px; }
+    .save-line { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+    /* ===== Contenu au stylet (même éditeur que le CRM) ===== */
+    #ink-screen { max-width: 900px; margin: 0 auto; }
+    .note-bar {
+      position: sticky; top: 0; z-index: 4; background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: max(8px, env(safe-area-inset-top)) 8px 8px;
+    }
+    .note-row { display: flex; align-items: center; gap: 8px; }
+    .note-row + .note-row { margin-top: 8px; }
+    .note-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tools { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; flex: 1; }
+    .tool {
+      height: 40px; min-width: 0; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); font-size: 17px; padding: 0; display: grid; place-items: center;
+    }
+    .tool.active { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--accent-soft); }
+    .tool .dot { width: 18px; height: 18px; border-radius: 50%; display: block; }
+    .tool:disabled { opacity: .35; cursor: default; }
+    .tool.wide { width: 40px; flex: none; }
+    .tool.sel-del { background: var(--danger-bg); border-color: var(--danger); }
+    .save-state { position: absolute; right: 8px; top: 6px; font-size: 0.7rem; color: #94a3b8; pointer-events: none; }
+    #page { position: relative; background: #fff; }
+    #ink { position: sticky; display: block; touch-action: none; width: 100%; }
+    #note-tip { position: absolute; left: 0; right: 0; top: 24px; text-align: center; color: #94a3b8; font-size: 0.9rem; pointer-events: none; padding: 0 20px; }
+
+    .photo-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 10; }
+    .photo-menu {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; background: var(--surface); display: grid; gap: 10px;
+      border-radius: 18px 18px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+      max-width: 560px; margin: 0 auto;
+    }
+    .crop-screen { position: fixed; inset: 0; z-index: 15; background: #000; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+    .crop-area { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; }
+    .crop-stage { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .crop-stage img { display: block; width: 100%; height: 100%; pointer-events: none; }
+    .crop-box { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.6); pointer-events: none; }
+    .crop-box i { position: absolute; width: 22px; height: 22px; border: 4px solid #fff; }
+    .crop-box i:nth-child(1) { left: -4px; top: -4px; border-right: 0; border-bottom: 0; }
+    .crop-box i:nth-child(2) { right: -4px; top: -4px; border-left: 0; border-bottom: 0; }
+    .crop-box i:nth-child(3) { left: -4px; bottom: -4px; border-right: 0; border-top: 0; }
+    .crop-box i:nth-child(4) { right: -4px; bottom: -4px; border-left: 0; border-top: 0; }
+    .crop-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
+    .crop-actions .btn { padding: 12px 6px; font-size: 0.9rem; }
 
     .toast {
       position: fixed; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
       padding: 11px 18px; border-radius: 10px; background: #0f172a; color: #fff; font-size: 14px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .25); max-width: calc(100vw - 32px); z-index: 20;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .25); max-width: calc(100vw - 32px); z-index: 30; text-align: center;
     }
 
+    @media (max-width: 500px) {
+      .details { padding-left: 12px; }
+    }
     @media (min-width: 700px) {
-      header { padding: 18px 32px; }
+      header.top { padding: 18px 32px; }
       main { padding-top: 28px; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <a id="back" href="../">←</a>
-    <h1>To do list</h1>
-    <button class="icon-btn" id="btn-sync" title="Synchroniser maintenant" aria-label="Synchroniser maintenant">⟳</button>
-    <button class="icon-btn" id="btn-settings" title="Réglages" aria-label="Réglages" hidden>⚙</button>
-  </header>
+  <!-- ===== Liste ===== -->
+  <div id="list-screen">
+    <header class="top">
+      <a id="back" href="../">←</a>
+      <h1>To do list</h1>
+      <button class="icon-btn" id="btn-sync" title="Synchroniser maintenant" aria-label="Synchroniser maintenant">⟳</button>
+      <button class="icon-btn" id="btn-settings" title="Réglages" aria-label="Réglages" hidden>⚙</button>
+    </header>
 
-  <main>
-    <div id="banner"></div>
+    <main>
+      <div id="banner"></div>
 
-    <form id="add" autocomplete="off">
-      <input id="new-title" placeholder="Nouvelle tâche…" maxlength="300" aria-label="Titre de la nouvelle tâche">
-      <button class="btn primary" type="submit">Ajouter</button>
-    </form>
+      <form id="add" autocomplete="off">
+        <div class="seg" id="new-type">
+          <button type="button" data-v="todo">✓ À faire</button>
+          <button type="button" data-v="note">📝 Note</button>
+        </div>
+        <input id="new-title" placeholder="Nouvelle tâche…" maxlength="300" aria-label="Titre">
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>
 
-    <div class="toolbar">
-      <span id="count"></span>
-      <label>Trier
-        <select id="sort">
-          <option value="manual">Mon ordre</option>
-          <option value="date-desc">Date (récentes d'abord)</option>
-          <option value="date-asc">Date (anciennes d'abord)</option>
-          <option value="name-asc">Nom (A → Z)</option>
-          <option value="name-desc">Nom (Z → A)</option>
-        </select>
-      </label>
+      <div class="toolbar">
+        <span id="count"></span>
+        <div class="right">
+          <label>Afficher
+            <select id="filter">
+              <option value="all">Tout</option>
+              <option value="todo">À faire</option>
+              <option value="note">Notes</option>
+            </select>
+          </label>
+          <label>Trier
+            <select id="sort">
+              <option value="manual">Mon ordre</option>
+              <option value="date-desc">Date (récentes d'abord)</option>
+              <option value="date-asc">Date (anciennes d'abord)</option>
+              <option value="name-asc">Nom (A → Z)</option>
+              <option value="name-desc">Nom (Z → A)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <ul class="tasks" id="list"></ul>
+      <p class="empty-msg" id="empty" hidden>Rien pour l'instant. Ajoutez une tâche ou une note ci-dessus.</p>
+
+      <button class="section-title" id="done-toggle" hidden></button>
+      <ul class="tasks" id="done-list" hidden></ul>
+
+      <p class="sync-info" id="sync-info"></p>
+    </main>
+  </div>
+
+  <!-- ===== Contenu au stylet ===== -->
+  <section id="ink-screen" hidden>
+    <div class="note-bar">
+      <div class="note-row">
+        <button class="icon-btn" id="note-back" aria-label="Retour">←</button>
+        <span class="note-title" id="note-title"></span>
+        <button class="tool wide" id="tool-photo" aria-label="Ajouter une photo" title="Ajouter une photo">📷</button>
+        <button class="tool wide" id="tool-finger" aria-label="Écrire au doigt" title="Écrire au doigt">☝</button>
+        <button class="tool wide" id="tool-crop" aria-label="Rogner la photo" title="Rogner la photo" hidden>✂️</button>
+        <button class="tool wide" id="tool-delete" aria-label="Retirer la sélection" title="Retirer la sélection">🗑</button>
+      </div>
+      <div class="note-row">
+        <div class="tools" id="tools">
+          <button class="tool" data-pen="#1b1f24" aria-label="Stylo noir" title="Stylo noir"><span class="dot" style="background:#1b1f24"></span></button>
+          <button class="tool" data-pen="#1d4ed8" aria-label="Stylo bleu" title="Stylo bleu"><span class="dot" style="background:#1d4ed8"></span></button>
+          <button class="tool" data-pen="#dc2626" aria-label="Stylo rouge" title="Stylo rouge"><span class="dot" style="background:#dc2626"></span></button>
+          <button class="tool" data-pen="#15803d" aria-label="Stylo vert" title="Stylo vert"><span class="dot" style="background:#15803d"></span></button>
+          <button class="tool" aria-label="Épaisseur" title="Épaisseur" id="tool-size">✎</button>
+          <button class="tool" data-tool="hl" aria-label="Surligneur" title="Surligneur"><span class="dot" style="background:#facc15;border-radius:3px"></span></button>
+          <button class="tool" data-tool="eraser" aria-label="Gomme" title="Gomme">⌫</button>
+          <button class="tool" id="tool-select" aria-label="Sélectionner pour déplacer" title="Sélectionner pour déplacer (réappuyer : rectangle ⇄ lasso)">⬚</button>
+          <button class="tool" id="tool-undo" aria-label="Annuler" title="Annuler (Ctrl+Z)">↶</button>
+          <button class="tool" id="tool-redo" aria-label="Rétablir" title="Rétablir (Ctrl+Y)">↷</button>
+        </div>
+      </div>
     </div>
+    <div id="page">
+      <canvas id="ink"></canvas>
+      <div id="note-tip"></div>
+      <span class="save-state" id="note-state"></span>
+    </div>
+  </section>
 
-    <ul class="tasks" id="list"></ul>
-    <p class="empty-msg" id="empty" hidden>Rien à faire pour l'instant. Ajoutez une tâche ci-dessus.</p>
+  <!-- ===== Contenu au clavier ===== -->
+  <section id="text-screen" hidden>
+    <header class="top">
+      <button class="icon-btn" id="t-back" aria-label="Retour">←</button>
+      <h1 id="t-title"></h1>
+    </header>
+    <main>
+      <div class="rte-bar" id="t-tools">
+        <button type="button" data-cmd="bold" aria-label="Gras" title="Gras (Ctrl+B)"><b>G</b></button>
+        <button type="button" data-cmd="italic" aria-label="Italique" title="Italique (Ctrl+I)"><i>I</i></button>
+        <button type="button" data-cmd="underline" aria-label="Souligné" title="Souligné (Ctrl+U)"><u>S</u></button>
+        <button type="button" data-cmd="strikeThrough" aria-label="Barré" title="Barré"><s>ab</s></button>
+        <button type="button" data-cmd="insertUnorderedList" aria-label="Liste à puces" title="Liste à puces">•</button>
+        <button type="button" data-cmd="insertOrderedList" aria-label="Liste numérotée" title="Liste numérotée">1.</button>
+        <button type="button" data-color="foreColor" data-value="#dc2626" aria-label="Texte rouge" title="Texte rouge"><span style="color:#dc2626;font-weight:700">A</span></button>
+        <button type="button" data-color="hiliteColor" data-value="#fef08a" aria-label="Surligner" title="Surligner"><span style="background:#fef08a;color:#1e293b;padding:0 4px">A</span></button>
+        <button type="button" data-cmd="removeFormat" aria-label="Effacer la mise en forme" title="Effacer la mise en forme">⌫</button>
+        <button type="button" id="t-photo" aria-label="Insérer une photo" title="Insérer une photo">📷</button>
+      </div>
+      <div class="html-doc" id="t-body" contenteditable="true" spellcheck="true" data-placeholder="Écrivez ici…"></div>
+      <p class="save-line" id="t-state"></p>
+    </main>
+  </section>
 
-    <button class="section-title" id="done-toggle" hidden></button>
-    <ul class="tasks" id="done-list" hidden></ul>
+  <!-- ===== Ajout d'une photo ===== -->
+  <div class="photo-bg" id="photo-bg" hidden></div>
+  <div class="photo-menu" id="photo-menu" hidden>
+    <label class="btn primary"><input type="file" id="photo-camera" accept="image/*" capture="environment" hidden>📸 Prendre une photo</label>
+    <label class="btn"><input type="file" id="photo-pick" accept="image/*" hidden>🖼️ Choisir une photo existante</label>
+    <button type="button" class="btn" id="photo-cancel">Annuler</button>
+  </div>
 
-    <p class="sync-info" id="sync-info"></p>
-  </main>
+  <!-- ===== Rognage d'une photo ===== -->
+  <div class="crop-screen" id="crop" hidden>
+    <div class="crop-area" id="crop-area">
+      <div class="crop-stage" id="crop-stage">
+        <img id="crop-img" alt="" draggable="false">
+        <div class="crop-box" id="crop-box"><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+    <div class="crop-actions">
+      <button type="button" class="btn" id="crop-cancel">Annuler</button>
+      <button type="button" class="btn" id="crop-full">Photo entière</button>
+      <button type="button" class="btn primary" id="crop-ok">Valider</button>
+    </div>
+  </div>
 
-  <!-- Modifier une tâche -->
+  <!-- ===== Modifier un élément ===== -->
   <dialog id="edit">
     <form method="dialog" id="edit-form">
-      <h2>Modifier la tâche</h2>
+      <h2>Modifier</h2>
+      <div class="seg" id="e-type">
+        <button type="button" data-v="todo">✓ À faire</button>
+        <button type="button" data-v="note">📝 Note</button>
+      </div>
       <label>Titre <input id="e-title" required maxlength="300"></label>
       <label>Date <input id="e-date" type="date" required></label>
-      <label>Description <textarea id="e-desc" placeholder="Détails, adresse, matériel…"></textarea></label>
       <div class="dialog-actions">
         <button class="btn" type="button" id="e-cancel">Annuler</button>
         <button class="btn primary" type="submit">Enregistrer</button>
@@ -230,7 +423,7 @@
     </form>
   </dialog>
 
-  <!-- Réglages (téléphone uniquement) -->
+  <!-- ===== Réglages (téléphone uniquement) ===== -->
   <dialog id="setup">
     <form id="setup-form">
       <h2>Relier au dépôt privé</h2>
@@ -249,24 +442,33 @@
 
   <div class="toast" id="toast" hidden></div>
 
+  <script src="ink.js"></script>
   <script>
     const $ = s => document.querySelector(s);
+    const $$ = s => [...document.querySelectorAll(s)];
     const ON_PC = ['localhost', '127.0.0.1'].includes(location.hostname);
-    const FILE = 'todo.json';
+    const LIST_FILE = 'todo.json';
+    const bodyPath = id => `todo/${id}.json`;
+    const photoPath = id => `todo/photos/${id}.jpg`;
+    // Sur le téléphone on écrit d'abord au stylet, sur le PC au clavier (les deux restent possibles)
+    const DEFAULT_FORMAT = ON_PC ? 'html' : 'ink';
 
     const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
     const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage plein ou bloqué */ } };
 
     // Sur le téléphone, la clé saisie pour la page Manques sert aussi ici (même dépôt privé)
     let config = ON_PC ? {} : (load('todo-config', null) || load('manque-config', {}));
-    let items = load('todo-items', []);       // toutes les tâches, y compris supprimées (pour propager la suppression)
+    let items = load('todo-items', []);       // tous les éléments, y compris supprimés (pour propager la suppression)
     let syncedAt = load('todo-synced-at', null);
     let dirty = load('todo-dirty', false);    // modifications pas encore envoyées
     let sortMode = load('todo-sort', 'manual');
+    let filterMode = load('todo-filter', 'all');
+    let newType = load('todo-new-type', 'todo');
     let showDone = load('todo-show-done', false);
-    let openId = null;                        // tâche dépliée (description visible)
+    let openId = null;                        // élément déplié (contenu visible)
     let editId = null;
     let rev = 0;                              // compteur de modifications locales
+    let screen = 'list';                      // list | ink | text
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     const nowIso = () => new Date().toISOString();
@@ -274,16 +476,17 @@
     const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
     const newId = () => crypto.randomUUID?.() ?? ([1e7] + -1e3 + -4e3 + -8e3 + -1e11)
       .replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    const typeOf = t => t.type === 'note' ? 'note' : 'todo';
 
     function fmtDay(ymd) {
       if (!ymd) return '';
       const [y, m, d] = ymd.split('-').map(Number);
-      const date = new Date(y, m - 1, d);
       const opts = { day: 'numeric', month: 'short' };
       if (y !== new Date().getFullYear()) opts.year = 'numeric';
-      return date.toLocaleDateString('fr-FR', opts);
+      return new Date(y, m - 1, d).toLocaleDateString('fr-FR', opts);
     }
     const fmtTime = iso => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const fmtHour = iso => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
     function toast(msg) {
       const t = $('#toast');
@@ -291,6 +494,7 @@
       clearTimeout(toast.timer);
       toast.timer = setTimeout(() => (t.hidden = true), 2800);
     }
+    const debounceAsync = (fn, ms) => { let t; const d = () => { clearTimeout(t); t = setTimeout(fn, ms); }; d.flush = () => { clearTimeout(t); return fn(); }; return d; };
 
     // ---------- Enregistrement local ----------
     function persist() {
@@ -298,25 +502,63 @@
       save('todo-dirty', dirty);
     }
 
-    function change(item, fields) {
+    // syncDelay : délai avant l'envoi (plus long pendant l'écriture d'une note)
+    function change(item, fields, syncDelay = 1500) {
       Object.assign(item, fields, { updated_at: nowIso() });
       dirty = true; rev++;
       persist();
-      render();
-      syncSoon();
+      if (screen === 'list') render();
+      syncSoon(syncDelay);
     }
+    const find = id => items.find(i => i.id === id);
+
+    // Contenus et photos (IndexedDB : les notes au stylet peuvent être volumineuses)
+    // contenu : { id, body, body_at (version), pushed (déjà dans le dépôt) } ; photo : { id, data (base64) }
+    const idb = (() => {
+      let dbp;
+      const open = () => dbp ??= new Promise((ok, ko) => {
+        const r = indexedDB.open('todo', 1);
+        r.onupgradeneeded = () => {
+          for (const name of ['bodies', 'photos']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name, { keyPath: 'id' });
+        };
+        r.onsuccess = () => ok(r.result);
+        r.onerror = () => ko(r.error);
+      });
+      const tx = async (mode, fn, store = 'bodies') => {
+        const db = await open();
+        return new Promise((ok, ko) => {
+          const t = db.transaction(store, mode), req = fn(t.objectStore(store));
+          t.oncomplete = () => ok(req?.result);
+          t.onerror = () => ko(t.error);
+        });
+      };
+      return {
+        get: id => tx('readonly', s => s.get(id)),
+        put: rec => tx('readwrite', s => s.put(rec)),
+        getPhoto: id => tx('readonly', s => s.get(id), 'photos'),
+        putPhoto: rec => tx('readwrite', s => s.put(rec), 'photos'),
+      };
+    })();
+    const bodyCache = new Map(); // id → { body, body_at } : affichage immédiat des contenus déjà lus
 
     // ---------- GitHub ----------
     const b64ToText = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
-    const textToB64 = s => { let bin = ''; new TextEncoder().encode(s).forEach(b => (bin += String.fromCharCode(b))); return btoa(bin); };
+    const textToB64 = s => {
+      const bytes = new TextEncoder().encode(s);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    };
     const ready = () => ON_PC || !!(config.repo && config.token);
 
-    async function gh(method, body) {
-      const url = ON_PC ? `/api/github/${FILE}` : `https://api.github.com/repos/${config.repo}/contents/${FILE}`;
-      const headers = ON_PC ? {} : { Authorization: `Bearer ${config.token}`, Accept: 'application/vnd.github+json' };
+    async function gh(method, p, body, accept = 'application/vnd.github+json') {
+      const url = ON_PC ? `/api/github/${p}` : `https://api.github.com/repos/${config.repo}/contents/${p}`;
+      const headers = { Accept: accept };
+      if (!ON_PC) headers.Authorization = `Bearer ${config.token}`;
       if (body) headers['Content-Type'] = 'application/json';
       const res = await fetch(url, { method, cache: 'no-store', headers, body: body ? JSON.stringify(body) : undefined });
       if (method === 'GET' && res.status === 404) return null;
+      if (accept.includes('raw') && res.ok) return res.text();
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const err = new Error(data.error
@@ -331,12 +573,28 @@
       return data;
     }
 
-    async function getRemote() {
-      const d = await gh('GET');
-      return d ? { json: JSON.parse(b64ToText(d.content)), sha: d.sha } : { json: null, sha: undefined };
+    async function getRemote(p) {
+      const d = await gh('GET', p);
+      if (!d) return { json: null, sha: undefined };
+      // Au-delà de 1 Mo, GitHub ne renvoie pas le contenu : on le lit en brut
+      const text = d.encoding === 'base64' && d.content ? b64ToText(d.content) : await gh('GET', p, undefined, 'application/vnd.github.raw+json');
+      return { json: JSON.parse(text), sha: d.sha };
     }
 
-    // Pour chaque tâche, la version modifiée le plus récemment l'emporte
+    // Écrit un fichier (plusieurs essais si un autre appareil l'a modifié au même moment)
+    async function putFile(p, json, message) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const existing = await gh('GET', p);
+        try {
+          return await gh('PUT', p, { message, sha: existing?.sha, content: textToB64(JSON.stringify(json) + '\n') });
+        } catch (e) {
+          if (e.status !== 409 && e.status !== 422) throw e;
+        }
+      }
+      throw new Error('Conflit avec un autre appareil, nouvel essai dans un instant');
+    }
+
+    // Pour chaque élément, la version modifiée le plus récemment l'emporte
     function merge(a, b) {
       const byId = new Map();
       for (const i of [...a, ...b]) {
@@ -346,9 +604,73 @@
       return [...byId.values()].sort((x, y) => x.id.localeCompare(y.id));
     }
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const DEVICE = ON_PC ? 'PC' : 'Téléphone';
+
+    // Photos : gardées sur l'appareil, envoyées une seule fois, avant le contenu qui les cite
+    const PHOTO_OUTBOX = 'todo-photo-outbox';
+    async function pushPhotos() {
+      for (const id of load(PHOTO_OUTBOX, [])) {
+        const rec = await idb.getPhoto(id);
+        try {
+          if (rec) await gh('PUT', photoPath(id), { message: `${DEVICE} : photo`, content: rec.data });
+        } catch (e) {
+          if (e.status !== 422) throw e; // 422 : déjà dans le dépôt (envoi précédent interrompu)
+        }
+        save(PHOTO_OUTBOX, load(PHOTO_OUTBOX, []).filter(x => x !== id));
+      }
+    }
+
+    // Base64 d'une photo : sur l'appareil, sinon téléchargée une fois
+    async function photoData(id) {
+      const rec = await idb.getPhoto(id);
+      if (rec) return rec.data;
+      if (!ready()) return null;
+      const file = await gh('GET', photoPath(id));
+      if (!file?.content) return null;
+      const data = file.content.replace(/\s/g, '');
+      await idb.putPhoto({ id, data });
+      return data;
+    }
+
+    // Contenus modifiés sur cet appareil : envoyés avant la liste qui annonce leur version
+    async function pushBodies(remoteById) {
+      for (const t of items) {
+        if (t.deleted || !t.format) continue;
+        const rec = await idb.get(t.id);
+        if (!rec || rec.pushed) continue;
+        const r = remoteById.get(t.id);
+        if (r?.body_at && String(r.body_at) > String(rec.body_at)) continue; // plus récent ailleurs : il sera relu
+        await putFile(bodyPath(t.id), { id: t.id, body_at: rec.body_at, format: t.format, body: rec.body }, `${DEVICE} : contenu d'une note`);
+        const cur = await idb.get(t.id);
+        if (cur && cur.body_at === rec.body_at) await idb.put({ ...cur, pushed: true });
+      }
+    }
+
+    // Contenu d'un élément : celui de l'appareil s'il est à jour, sinon relu dans le dépôt
+    async function loadBody(t) {
+      let rec = await idb.get(t.id);
+      if (t.body_at && ready() && (!rec || String(rec.body_at) < String(t.body_at))) {
+        try {
+          const f = await getRemote(bodyPath(t.id));
+          if (f.json) { rec = { id: t.id, body: f.json.body, body_at: f.json.body_at, pushed: true }; await idb.put(rec); }
+        } catch { /* hors connexion : version de l'appareil */ }
+      }
+      if (rec) bodyCache.set(t.id, { body: rec.body, body_at: rec.body_at });
+      return rec;
+    }
+
+    // Après la synchronisation : récupère les contenus modifiés ailleurs (pour les avoir hors connexion)
+    async function pullBodies() {
+      for (const t of items) {
+        if (t.deleted || !t.body_at || t.id === note.id || t.id === textDoc.id) continue;
+        const rec = await idb.get(t.id);
+        if (rec && String(rec.body_at) >= String(t.body_at)) continue;
+        try { await loadBody(t); } catch { return; }
+      }
+    }
 
     let syncing = false, again = false, syncTimer;
-    const syncSoon = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => sync({ quiet: true }), 1500); };
+    const syncSoon = (ms = 1500) => { clearTimeout(syncTimer); syncTimer = setTimeout(() => sync({ quiet: true }), ms); };
 
     async function sync({ quiet = false } = {}) {
       if (!ready()) return;
@@ -357,18 +679,22 @@
       const startRev = rev;
       setSyncInfo('Synchronisation…');
       try {
+        await saveInk.flush();
+        await saveText.flush();
+        await pushPhotos();
         let done = false;
         // Jusqu'à 3 essais si un autre appareil écrit au même moment (conflit de version)
         for (let attempt = 0; attempt < 3 && !done; attempt++) {
-          const remote = await getRemote();
+          const remote = await getRemote(LIST_FILE);
           const remoteItems = merge([], remote.json?.items || []);
+          await pushBodies(new Map(remoteItems.map(i => [i.id, i])));
           const merged = merge(remoteItems, items);
           if (remote.json && same(remoteItems, merged)) { done = merged; break; }
           try {
-            await gh('PUT', {
-              message: `${ON_PC ? 'PC' : 'Téléphone'} : mise à jour de la To do list`,
+            await gh('PUT', LIST_FILE, {
+              message: `${DEVICE} : mise à jour de la To do list`,
               sha: remote.sha,
-              content: textToB64(JSON.stringify({ version: 1, items: merged }, null, 1) + '\n'),
+              content: textToB64(JSON.stringify({ version: 2, items: merged }, null, 1) + '\n'),
             });
             done = merged;
           } catch (e) {
@@ -383,6 +709,7 @@
         save('todo-synced-at', syncedAt);
         persist();
         setBanner('');
+        await pullBodies();
       } catch (e) {
         // TypeError = la requête n'a pas pu partir (pas de réseau, serveur injoignable)
         const offline = navigator.onLine === false || e instanceof TypeError || e.offline;
@@ -392,7 +719,7 @@
         if (!quiet) toast(offline ? 'Pas de connexion' : e.message);
       } finally {
         syncing = false;
-        render();
+        if (screen === 'list') render();
         if (again || (dirty && rev !== startRev)) syncSoon();
       }
     }
@@ -402,7 +729,7 @@
     }
     function setSyncInfo(text) { $('#sync-info').textContent = text; }
 
-    // ---------- Tri ----------
+    // ---------- Tri et filtre ----------
     const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
     const byPosition = (a, b) => (a.position - b.position) || String(a.created_at).localeCompare(String(b.created_at));
     const SORTS = {
@@ -413,21 +740,30 @@
       'name-desc': (a, b) => collator.compare(b.title, a.title),
     };
     const live = () => items.filter(i => !i.deleted);
-    const openTasks = () => live().filter(i => !i.done).sort(SORTS[sortMode] || byPosition);
-    const doneTasks = () => live().filter(i => i.done).sort(sortMode === 'manual'
+    const shown = t => filterMode === 'all' || typeOf(t) === filterMode;
+    const isDone = t => typeOf(t) === 'todo' && t.done;
+    const openTasks = () => live().filter(t => !isDone(t) && shown(t)).sort(SORTS[sortMode] || byPosition);
+    const doneTasks = () => live().filter(t => isDone(t) && shown(t)).sort(sortMode === 'manual'
       ? (a, b) => String(b.done_at).localeCompare(String(a.done_at)) // dernières réalisées en haut
       : SORTS[sortMode]);
 
-    // ---------- Affichage ----------
+    // ---------- Affichage de la liste ----------
+    const CONTENT_ICON = { ink: '✍️', html: '📄' };
     function taskHtml(t, i, list) {
       const isOpen = t.id === openId;
-      const manual = sortMode === 'manual' && !t.done;
+      const type = typeOf(t);
+      const manual = sortMode === 'manual' && !isDone(t);
+      const writeBtns = DEFAULT_FORMAT === 'ink'
+        ? `<button class="btn primary" data-act="write-ink">✍️ Écrire au stylet</button><button class="btn" data-act="write-html">⌨️ Écrire au clavier</button>`
+        : `<button class="btn primary" data-act="write-html">⌨️ Écrire au clavier</button><button class="btn" data-act="write-ink">✍️ Écrire au stylet</button>`;
       return `
-        <li class="task ${t.done ? 'done' : ''} ${isOpen ? 'open' : ''}" data-id="${esc(t.id)}">
+        <li class="task type-${type} ${isDone(t) ? 'done' : ''} ${isOpen ? 'open' : ''}" data-id="${esc(t.id)}">
           <div class="row">
-            <button class="check" data-act="toggle" aria-label="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}" title="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}">✓</button>
+            ${type === 'todo'
+              ? `<button class="check" data-act="toggle" aria-label="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}" title="${t.done ? 'Remettre à faire' : 'Marquer comme réalisée'}">✓</button>`
+              : `<span class="note-ico" title="Note" aria-label="Note">📝</span>`}
             <button class="main" data-act="expand" aria-expanded="${isOpen}">
-              <span class="title">${esc(t.title)}${t.description ? ' <span class="has-desc" title="A une description">📝</span>' : ''}</span>
+              <span class="title">${esc(t.title)}${t.format ? `<span class="has-content" title="${t.format === 'ink' ? 'Contenu au stylet' : 'Contenu au clavier'}">${CONTENT_ICON[t.format]}</span>` : ''}</span>
               <span class="date">${esc(fmtDay(t.date))}</span>
             </button>
             ${manual ? `<span class="moves">
@@ -436,9 +772,10 @@
             </span>` : ''}
           </div>
           ${isOpen ? `<div class="details">
-            <p class="desc ${t.description ? '' : 'empty'}">${t.description ? esc(t.description) : 'Pas de description'}</p>
-            <div class="meta">Ajoutée le ${esc(fmtTime(t.created_at))}${t.done && t.done_at ? ` · réalisée le ${esc(fmtTime(t.done_at))}` : ''}</div>
+            ${t.format ? `<div class="preview" data-preview="${esc(t.id)}" data-act="open" title="Ouvrir"></div>` : '<p class="desc empty">Pas encore de contenu</p>'}
+            <div class="meta">${type === 'note' ? 'Note' : 'À faire'} · ajoutée le ${esc(fmtTime(t.created_at))}${t.done && t.done_at ? ` · réalisée le ${esc(fmtTime(t.done_at))}` : ''}</div>
             <div class="actions">
+              ${t.format ? `<button class="btn primary" data-act="open">${t.format === 'ink' ? '✍️ Ouvrir' : '📄 Ouvrir'}</button>` : writeBtns}
               <button class="btn" data-act="edit">Modifier</button>
               <button class="btn danger" data-act="delete">Supprimer</button>
             </div>
@@ -450,30 +787,91 @@
       const open = openTasks(), done = doneTasks();
       $('#list').innerHTML = open.map((t, i) => taskHtml(t, i, open)).join('');
       $('#list').hidden = !open.length;
-      $('#empty').hidden = open.length > 0;
-      $('#count').textContent = open.length ? `${open.length} à faire` : '';
+      $('#empty').hidden = open.length > 0 || done.length > 0;
+      const nTodo = live().filter(t => typeOf(t) === 'todo' && !t.done).length, nNote = live().filter(t => typeOf(t) === 'note').length;
+      $('#count').textContent = [nTodo ? `${nTodo} à faire` : '', nNote ? `${nNote} note${nNote > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
       $('#done-toggle').hidden = !done.length;
       $('#done-toggle').textContent = `${showDone ? '▾' : '▸'} Réalisées (${done.length})`;
       $('#done-list').hidden = !done.length || !showDone;
       $('#done-list').innerHTML = showDone ? done.map((t, i) => taskHtml(t, i, done)).join('') : '';
       $('#sort').value = sortMode;
+      $('#filter').value = filterMode;
+      $$('#new-type button').forEach(b => b.classList.toggle('active', b.dataset.v === newType));
+      $('#new-title').placeholder = newType === 'note' ? 'Nouvelle note…' : 'Nouvelle tâche…';
       $('#btn-settings').hidden = ON_PC;
       if (!syncing) {
         setSyncInfo(!ready() ? 'Pas encore reliée au dépôt : touchez ⚙ pour la relier.'
           : [syncedAt ? `Synchronisée le ${fmtTime(syncedAt)}` : 'Jamais synchronisée',
              dirty ? 'modifications en attente d\'envoi' : ''].filter(Boolean).join(' · '));
       }
+      fillPreviews();
     }
 
-    // ---------- Actions ----------
+    // Aperçu du contenu de l'élément déplié
+    function fillPreviews() {
+      for (const el of $$('[data-preview]')) {
+        const t = find(el.dataset.preview);
+        if (!t?.format) continue;
+        const c = bodyCache.get(t.id);
+        if (c && String(c.body_at) >= String(t.body_at)) { paintPreview(el, t, c.body); continue; }
+        el.innerHTML = '<p class="desc empty">Chargement…</p>';
+        loadBody(t).then(rec => {
+          if (!el.isConnected) return;
+          if (rec) paintPreview(el, t, rec.body);
+          else el.innerHTML = '<p class="desc empty">Contenu pas encore sur cet appareil (connexion nécessaire)</p>';
+        });
+      }
+    }
+    function paintPreview(el, t, body) {
+      if (t.format === 'ink') {
+        el.innerHTML = '<div class="ink-prev"><canvas></canvas></div>';
+        Ink.render(el.querySelector('canvas'), body, photoImage);
+      } else {
+        el.innerHTML = `<div class="html-doc">${sanitizeHtml(body) || '<p class="desc empty">Vide</p>'}</div>`;
+        loadHtmlPhotos(el);
+      }
+    }
+
+    // Photos affichées dans les notes au stylet : chargées à la demande, la page est redessinée à l'arrivée
+    const photoImages = new Map();
+    function photoImage(id) {
+      if (photoImages.has(id)) return photoImages.get(id);
+      const img = new Image();
+      photoImages.set(id, img);
+      img.onload = () => {
+        if (screen === 'ink') redraw();
+        for (const el of $$('[data-preview]')) { const t = find(el.dataset.preview); const c = bodyCache.get(t?.id); if (t?.format === 'ink' && c) paintPreview(el, t, c.body); }
+      };
+      photoData(id).then(data => {
+        if (data) img.src = `data:image/jpeg;base64,${data}`;
+        else photoImages.delete(id);
+      }).catch(() => photoImages.delete(id)); // hors connexion : nouvel essai au prochain affichage
+      return img;
+    }
+    function loadHtmlPhotos(root) {
+      for (const img of root.querySelectorAll('img[data-photo]')) {
+        if (img.src) continue;
+        photoData(img.dataset.photo).then(data => { if (data) img.src = `data:image/jpeg;base64,${data}`; }).catch(() => {});
+      }
+    }
+
+    // ---------- Actions de la liste ----------
+    $('#new-type').addEventListener('click', e => {
+      const v = e.target.closest('button')?.dataset.v;
+      if (!v) return;
+      newType = v; save('todo-new-type', v); render();
+      $('#new-title').focus();
+    });
+
     $('#add').addEventListener('submit', e => {
       e.preventDefault();
       const title = $('#new-title').value.trim();
       if (!title) return $('#new-title').focus();
-      const positions = items.filter(i => !i.deleted && !i.done).map(i => i.position);
+      const positions = items.filter(i => !i.deleted && !isDone(i)).map(i => i.position);
       const now = nowIso();
       const t = {
-        id: newId(), title, description: '', date: today(), done: false, done_at: null,
+        id: newId(), type: newType, title, date: today(), done: false, done_at: null,
+        format: null, body_at: null,
         // En haut de « Mon ordre » ; la petite part aléatoire évite deux positions égales entre appareils
         position: Math.min(0, ...positions) - 1 - Math.random() / 2,
         created_at: now, updated_at: now, deleted: false,
@@ -481,9 +879,9 @@
       items.push(t);
       $('#new-title').value = '';
       change(t, {});
+      // Une note s'ouvre tout de suite pour l'écrire
+      if (newType === 'note') openEditor(t, DEFAULT_FORMAT);
     });
-
-    function find(id) { return items.find(i => i.id === id); }
 
     function move(t, dir) {
       const list = openTasks();
@@ -516,9 +914,12 @@
           break;
         case 'up': move(t, -1); break;
         case 'down': move(t, 1); break;
+        case 'open': openEditor(t, t.format); break;
+        case 'write-ink': openEditor(t, 'ink'); break;
+        case 'write-html': openEditor(t, 'html'); break;
         case 'edit': openEdit(t); break;
         case 'delete':
-          if (confirm(`Supprimer la tâche « ${t.title} » ?`)) { openId = null; change(t, { deleted: true }); toast('Tâche supprimée'); }
+          if (confirm(`Supprimer « ${t.title} » ?`)) { openId = null; change(t, { deleted: true }); toast('Supprimé'); }
           break;
       }
     }
@@ -527,26 +928,740 @@
 
     $('#done-toggle').addEventListener('click', () => { showDone = !showDone; save('todo-show-done', showDone); render(); });
     $('#sort').addEventListener('change', e => { sortMode = e.target.value; save('todo-sort', sortMode); render(); });
+    $('#filter').addEventListener('change', e => { filterMode = e.target.value; save('todo-filter', filterMode); render(); });
     $('#btn-sync').addEventListener('click', () => sync());
 
-    // ---------- Modifier ----------
+    // ---------- Modifier (titre, date, type) ----------
+    let editType = 'todo';
+    const renderEditType = () => $$('#e-type button').forEach(b => b.classList.toggle('active', b.dataset.v === editType));
     function openEdit(t) {
       editId = t.id;
+      editType = typeOf(t);
+      renderEditType();
       $('#e-title').value = t.title;
       $('#e-date').value = t.date || today();
-      $('#e-desc').value = t.description || '';
       $('#edit').showModal();
     }
+    $('#e-type').addEventListener('click', e => { const v = e.target.closest('button')?.dataset.v; if (v) { editType = v; renderEditType(); } });
     $('#e-cancel').addEventListener('click', () => $('#edit').close());
     $('#edit-form').addEventListener('submit', e => {
       e.preventDefault();
       const t = find(editId);
       const title = $('#e-title').value.trim();
       if (!t || !title) return;
-      change(t, { title, date: $('#e-date').value || t.date, description: $('#e-desc').value.trim() });
+      const fields = { title, date: $('#e-date').value || t.date, type: editType };
+      if (editType === 'note') Object.assign(fields, { done: false, done_at: null }); // une note ne se coche pas
+      change(t, fields);
       $('#edit').close();
-      toast('Tâche modifiée');
+      toast('Modifié');
     });
+
+    // ---------- Écrans ----------
+    function showScreen(s, push = true) {
+      if (screen === 'ink' && s !== 'ink') leaveInk();
+      if (screen === 'text' && s !== 'text') leaveText();
+      screen = s;
+      $('#list-screen').hidden = s !== 'list';
+      $('#ink-screen').hidden = s !== 'ink';
+      $('#text-screen').hidden = s !== 'text';
+      if (push && s !== 'list') history.pushState({ screen: s }, '');
+      window.scrollTo(0, 0);
+      if (s === 'list') render();
+    }
+    // Bouton retour (Android ou navigateur) : ferme le rognage, puis l'éditeur
+    window.addEventListener('popstate', () => {
+      if (!$('#crop').hidden) { closeCrop(); return; }
+      if (screen !== 'list') showScreen('list', false);
+    });
+
+    async function openEditor(t, format) {
+      if (t.format && t.format !== format) format = t.format; // le contenu garde sa forme
+      const rec = t.format ? await loadBody(t) : null;
+      if (t.format && !rec) { toast('Contenu pas encore sur cet appareil (connexion nécessaire)'); return; }
+      if (format === 'ink') openInk(t, rec);
+      else openText(t, rec);
+    }
+
+    // ---------- Contenu au stylet (repris du CRM) ----------
+    const canvas = $('#ink'), pageEl = $('#page');
+    const ctx = canvas.getContext('2d');
+    const SIZES = [3, 5, 9];
+    const note = {
+      id: null, doc: null, k: 1, dpr: 1, viewH: 0, top: 0,
+      tool: 'pen', color: load('todo-pen-color', '#1b1f24'), size: load('todo-pen-size', 1),
+      finger: load('todo-finger-draws', false), undo: [], redo: [], dirty: false, sel: null,
+    };
+
+    const bbox = s => { let a = Infinity, b = -Infinity; for (let i = 1; i < s.pts.length; i += 3) { a = Math.min(a, s.pts[i]); b = Math.max(b, s.pts[i]); } s.y0 = a - s.s * 2; s.y1 = b + s.s * 2; return s; };
+
+    function openInk(t, rec) {
+      note.id = t.id;
+      note.doc = Ink.decode(rec?.body || '');
+      note.doc.strokes.forEach(bbox);
+      note.undo = []; note.redo = []; note.dirty = false; note.sel = null;
+      $('#note-title').textContent = t.title;
+      $('#note-state').textContent = '';
+      showScreen('ink');
+      layoutNote();
+      renderTools();
+    }
+
+    const usedBottom = () => Math.max(note.doc.strokes.reduce((m, s) => Math.max(m, s.y1 || 0), 0), ...note.doc.images.map(i => i.y + i.h), 0);
+
+    function layoutNote() {
+      const bar = $('.note-bar').getBoundingClientRect().height;
+      const cssW = pageEl.clientWidth;
+      note.k = cssW / Ink.W;
+      note.viewH = window.innerHeight - bar;
+      note.dpr = Math.min(window.devicePixelRatio || 1, 3);
+      canvas.style.top = `${bar}px`;
+      canvas.style.height = `${note.viewH}px`;
+      canvas.width = Math.round(cssW * note.dpr);
+      canvas.height = Math.round(note.viewH * note.dpr);
+      // La page fait au moins 1,5 écran et garde toujours de la place sous la dernière ligne écrite
+      note.doc.h = Math.max(note.doc.h || 0, usedBottom() + 900, (note.viewH / note.k) * 1.5);
+      pageEl.style.height = `${note.doc.h * note.k}px`;
+      $('#note-tip').textContent = note.doc.strokes.length || note.doc.images.length ? ''
+        : ON_PC ? 'Écrivez à la souris, au stylet ou au doigt. La molette fait défiler la page.'
+        : note.finger ? 'Écrivez au doigt. Deux doigts pour faire défiler.'
+        : 'Écrivez avec le stylet. Un doigt fait défiler la page.';
+      redraw();
+    }
+
+    // Position de la page affichée dans le canvas (le canvas reste fixe, la page défile dessous)
+    const pageOffset = () => canvas.getBoundingClientRect().top - pageEl.getBoundingClientRect().top;
+
+    function redraw() {
+      if (!note.doc) return;
+      note.top = pageOffset();
+      const k = note.k, top = note.top / k, bottom = top + note.viewH / k;
+      ctx.setTransform(note.dpr, 0, 0, note.dpr, 0, -note.top * note.dpr);
+      const visible = {
+        ...note.doc,
+        strokes: note.doc.strokes.filter(s => s.y1 >= top && s.y0 <= bottom),
+        images: note.doc.images.filter(i => i.y + i.h >= top && i.y <= bottom),
+      };
+      Ink.drawPage(ctx, visible, k, { image: photoImage });
+      drawSelection();
+    }
+
+    // Sélection (rectangle ou lasso) pour déplacer une zone
+    let selGesture = null;
+    note.selMode = load('todo-select-mode', 'rect');
+
+    function drawSelection() {
+      const k = note.k;
+      ctx.save();
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = '#2563eb';
+      if (selGesture?.kind === 'region') {
+        const p = selGesture.pts;
+        ctx.fillStyle = 'rgba(37,99,235,.06)';
+        ctx.beginPath();
+        if (note.selMode === 'rect') ctx.rect(p[0] * k, p[1] * k, (p[p.length - 2] - p[0]) * k, (p[p.length - 1] - p[1]) * k);
+        else { ctx.moveTo(p[0] * k, p[1] * k); for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * k, p[i + 1] * k); ctx.closePath(); }
+        ctx.fill(); ctx.stroke();
+      }
+      if (note.sel) {
+        const [x0, y0, x1, y1] = note.sel.box;
+        ctx.fillStyle = 'rgba(37,99,235,.08)';
+        ctx.fillRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+        ctx.strokeRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+        // poignée centrale : « faire glisser pour déplacer »
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#2563eb';
+        ctx.beginPath(); ctx.arc((x0 + x1) / 2 * k, (y0 + y1) / 2 * k, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✥', (x0 + x1) / 2 * k, (y0 + y1) / 2 * k + 1);
+      }
+      ctx.restore();
+    }
+
+    function insidePolygon(x, y, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 2; i < poly.length; j = i, i += 2) {
+        const xi = poly[i], yi = poly[i + 1], xj = poly[j], yj = poly[j + 1];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+
+    const selBox = (strokes, images = []) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const i of images) { x0 = Math.min(x0, i.x); y0 = Math.min(y0, i.y); x1 = Math.max(x1, i.x + i.w); y1 = Math.max(y1, i.y + i.h); }
+      for (const s of strokes) for (let i = 0; i < s.pts.length; i += 3) {
+        x0 = Math.min(x0, s.pts[i]); x1 = Math.max(x1, s.pts[i]); y0 = Math.min(y0, s.pts[i + 1]); y1 = Math.max(y1, s.pts[i + 1]);
+      }
+      const p = 14;
+      return [x0 - p, y0 - p, x1 + p, y1 + p];
+    };
+
+    // Un trait est sélectionné quand au moins la moitié de ses points est dans la zone
+    function finishRegion() {
+      let poly = selGesture.pts;
+      // Simple appui sur une photo : elle est sélectionnée
+      const xs = poly.filter((_, i) => i % 2 === 0), ys = poly.filter((_, i) => i % 2);
+      if (Math.max(...xs) - Math.min(...xs) < 12 && Math.max(...ys) - Math.min(...ys) < 12) {
+        const hit = note.doc.images.findLast(i => xs[0] >= i.x && xs[0] <= i.x + i.w && ys[0] >= i.y && ys[0] <= i.y + i.h);
+        note.sel = hit ? { strokes: [], images: [hit], box: selBox([], [hit]) } : null;
+        return;
+      }
+      if (note.selMode === 'rect') {
+        const [ax, ay] = poly, bx = poly[poly.length - 2], by = poly[poly.length - 1];
+        poly = [ax, ay, bx, ay, bx, by, ax, by];
+      }
+      const strokes = poly.length >= 6 ? note.doc.strokes.filter(s => {
+        let n = 0;
+        for (let i = 0; i < s.pts.length; i += 3) if (insidePolygon(s.pts[i], s.pts[i + 1], poly)) n++;
+        return n * 2 >= s.pts.length / 3;
+      }) : [];
+      const images = poly.length >= 6 ? note.doc.images.filter(i => insidePolygon(i.x + i.w / 2, i.y + i.h / 2, poly)) : [];
+      note.sel = strokes.length || images.length ? { strokes, images, box: selBox(strokes, images) } : null;
+    }
+
+    // Pendant le glissé, les positions restent exactes ; elles sont arrondies au lâcher (fichier plus léger)
+    function moveStrokes(strokes, dx, dy, round = true, images = []) {
+      for (const i of images) { i.x += dx; i.y += dy; }
+      for (const s of strokes) {
+        for (let i = 0; i < s.pts.length; i += 3) {
+          s.pts[i] += dx; s.pts[i + 1] += dy;
+          if (round) { s.pts[i] = Math.round(s.pts[i]); s.pts[i + 1] = Math.round(s.pts[i + 1]); }
+        }
+        bbox(s);
+      }
+    }
+
+    const inSelection = (x, y) => {
+      const b = note.sel?.box, m = 10;
+      return !!b && x >= b[0] - m && x <= b[2] + m && y >= b[1] - m && y <= b[3] + m;
+    };
+
+    // Retire la zone sélectionnée (photo ou traits) ; « annuler » la remet
+    function removeSelection() {
+      const op = { type: 'remove', strokes: [], images: [] };
+      for (const s of note.sel.strokes) {
+        op.strokes.unshift({ s, i: note.doc.strokes.indexOf(s) });
+        note.doc.strokes.splice(note.doc.strokes.indexOf(s), 1);
+      }
+      for (const img of note.sel.images) {
+        op.images.unshift({ img, i: note.doc.images.indexOf(img) });
+        note.doc.images.splice(note.doc.images.indexOf(img), 1);
+      }
+      op.strokes.sort((a, b) => a.i - b.i);
+      op.images.sort((a, b) => a.i - b.i);
+      note.undo.push(op);
+      note.redo = [];
+      note.sel = null;
+      inkChanged(); redraw(); renderTools();
+    }
+
+    function clearSelection() {
+      if (!note.sel && !selGesture) return;
+      note.sel = null; selGesture = null;
+      redraw();
+    }
+
+    $('#tool-select').addEventListener('click', () => {
+      // Deuxième appui : rectangle ⇄ lasso
+      if (note.tool === 'select') {
+        note.selMode = note.selMode === 'rect' ? 'lasso' : 'rect';
+        save('todo-select-mode', note.selMode);
+        clearSelection();
+      }
+      note.tool = 'select';
+      renderTools();
+      toast(note.selMode === 'rect' ? 'Sélection rectangle : entourez la zone, puis faites-la glisser (réappuyez pour le lasso)'
+        : 'Sélection au lasso : entourez la zone, puis faites-la glisser (réappuyez pour le rectangle)');
+    });
+    window.addEventListener('scroll', () => { if (screen === 'ink') requestAnimationFrame(redraw); }, { passive: true });
+    window.addEventListener('resize', () => { if (screen === 'ink') layoutNote(); });
+
+    function grow(y) {
+      if (y > note.doc.h - 500) {
+        note.doc.h += 1000;
+        pageEl.style.height = `${note.doc.h * note.k}px`;
+      }
+    }
+
+    function renderTools() {
+      $$('[data-pen]').forEach(b => b.classList.toggle('active', note.tool === 'pen' && b.dataset.pen === note.color));
+      $$('[data-tool]').forEach(b => b.classList.toggle('active', note.tool === b.dataset.tool));
+      $('#tool-select').classList.toggle('active', note.tool === 'select');
+      $('#tool-select').textContent = note.selMode === 'lasso' ? '➰' : '⬚';
+      if (note.tool !== 'select') clearSelection();
+      $('#tool-delete').classList.toggle('sel-del', !!note.sel);
+      $('#tool-delete').disabled = !note.sel;
+      // Une photo seule sélectionnée : ✂️ prend la place de ☝
+      const onePhoto = note.sel?.images?.length === 1 && !note.sel.strokes.length;
+      $('#tool-crop').hidden = !onePhoto;
+      $('#tool-finger').hidden = onePhoto;
+      $('#tool-size').innerHTML = `<span class="dot" style="width:${6 + note.size * 5}px;height:${6 + note.size * 5}px;background:currentColor"></span>`;
+      $('#tool-finger').classList.toggle('active', note.finger);
+      $('#tool-undo').disabled = !note.undo.length;
+      $('#tool-redo').disabled = !note.redo.length;
+    }
+    $$('[data-pen]').forEach(b => b.addEventListener('click', () => { note.tool = 'pen'; note.color = b.dataset.pen; save('todo-pen-color', note.color); renderTools(); }));
+    $$('[data-tool]').forEach(b => b.addEventListener('click', () => { note.tool = b.dataset.tool; renderTools(); }));
+    $('#tool-size').addEventListener('click', () => { note.size = (note.size + 1) % SIZES.length; save('todo-pen-size', note.size); if (note.tool !== 'pen') note.tool = 'pen'; renderTools(); });
+    $('#tool-finger').addEventListener('click', () => {
+      note.finger = !note.finger; save('todo-finger-draws', note.finger); renderTools();
+      toast(note.finger ? 'Écriture au doigt : deux doigts pour faire défiler' : 'Écriture au stylet : un doigt fait défiler');
+      layoutNote();
+    });
+
+    function applyOp(op, reverse) {
+      clearSelection();
+      if (op.type === 'crop') {
+        Object.assign(op.img, reverse ? op.before : op.after);
+        inkChanged(); redraw();
+        return;
+      }
+      if (op.type === 'move') {
+        moveStrokes(op.strokes, reverse ? -op.dx : op.dx, reverse ? -op.dy : op.dy, true, op.images);
+        inkChanged(); redraw();
+        return;
+      }
+      const add = op.type === 'add' ? !reverse : reverse;
+      if (add) op.strokes.forEach(({ s, i }) => note.doc.strokes.splice(Math.min(i, note.doc.strokes.length), 0, s));
+      else op.strokes.forEach(({ s }) => { const i = note.doc.strokes.indexOf(s); if (i >= 0) note.doc.strokes.splice(i, 1); });
+      if (add) (op.images || []).forEach(({ img, i }) => note.doc.images.splice(Math.min(i, note.doc.images.length), 0, img));
+      else (op.images || []).forEach(({ img }) => { const i = note.doc.images.indexOf(img); if (i >= 0) note.doc.images.splice(i, 1); });
+      inkChanged();
+      redraw();
+    }
+    const inkUndo = () => { const op = note.undo.pop(); if (!op) return; applyOp(op, true); note.redo.push(op); renderTools(); };
+    const inkRedo = () => { const op = note.redo.pop(); if (!op) return; applyOp(op, false); note.undo.push(op); renderTools(); };
+    $('#tool-undo').addEventListener('click', inkUndo);
+    $('#tool-redo').addEventListener('click', inkRedo);
+    document.addEventListener('keydown', e => {
+      if (screen !== 'ink' || !(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); inkUndo(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); inkRedo(); }
+    });
+
+    // Saisie : stylet ou souris = écrire ; doigt = faire défiler (ou écrire si l'option est activée, deux doigts pour défiler)
+    const touches = new Map();
+    let current = null, erasing = null, penDown = false, fling = null;
+
+    const toPage = e => {
+      const r = pageEl.getBoundingClientRect();
+      return [(e.clientX - r.left) / note.k, (e.clientY - r.top) / note.k];
+    };
+    const pressure = e => e.pointerType === 'pen' && e.pressure > 0 ? Math.max(1, Math.min(9, Math.round(e.pressure * 9))) : 5;
+    const drawsWith = e => e.pointerType === 'pen' || e.pointerType === 'mouse' || (e.pointerType === 'touch' && note.finger && touches.size <= 1);
+
+    canvas.addEventListener('pointerdown', e => {
+      cancelAnimationFrame(fling);
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.pointerType === 'touch') {
+        if (penDown) return; // paume posée pendant l'écriture : ignorée
+        touches.set(e.pointerId, { y: e.clientY, t: e.timeStamp, v: 0 });
+        if (note.finger && touches.size === 2 && current) { // deuxième doigt : c'était un défilement
+          note.doc.strokes.pop(); current = null; redraw();
+        }
+      }
+      // Une zone sélectionnée (une photo par exemple) se déplace aussi au doigt
+      const dragsSel = e.pointerType === 'touch' && note.tool === 'select' && inSelection(...toPage(e));
+      if (!drawsWith(e) && !dragsSel) return;
+      e.preventDefault();
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
+      if (e.pointerType === 'pen') penDown = true;
+      const [x, y] = toPage(e);
+      $('#note-tip').textContent = '';
+      if (note.tool === 'eraser') { erasing = { pointer: e.pointerId, removed: [] }; eraseAt(x, y); return; }
+      if (note.tool === 'select') {
+        if (inSelection(x, y)) {
+          selGesture = { pointer: e.pointerId, kind: 'move', x, y, dx: 0, dy: 0 };
+        } else {
+          note.sel = null;
+          selGesture = { pointer: e.pointerId, kind: 'region', pts: [Math.round(x), Math.round(y)] };
+        }
+        redraw();
+        return;
+      }
+      const hl = note.tool === 'hl';
+      current = { pointer: e.pointerId, s: { c: hl ? '#facc15' : note.color, s: hl ? 22 : SIZES[note.size], a: hl ? 0.35 : 1, pts: [Math.round(x), Math.round(y), pressure(e)] } };
+      note.doc.strokes.push(current.s);
+      bbox(current.s);
+      redraw();
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType === 'touch' && touches.has(e.pointerId) && !(current?.pointer === e.pointerId) && !(erasing?.pointer === e.pointerId)
+        && !(selGesture?.pointer === e.pointerId)) {
+        // Défilement manuel (le canvas bloque le défilement natif pour que le stylet écrive)
+        const t = touches.get(e.pointerId);
+        const dy = e.clientY - t.y, dt = Math.max(1, e.timeStamp - t.t);
+        if (!note.finger || touches.size >= 2) window.scrollBy(0, -dy / (note.finger ? touches.size : 1));
+        t.v = 0.8 * (dy / dt) + 0.2 * t.v; t.y = e.clientY; t.t = e.timeStamp;
+        return;
+      }
+      if (erasing?.pointer === e.pointerId) { const [x, y] = toPage(e); eraseAt(x, y); return; }
+      if (selGesture?.pointer === e.pointerId) {
+        const [x, y] = toPage(e);
+        if (selGesture.kind === 'region') {
+          const p = selGesture.pts;
+          if (note.selMode === 'rect') p.splice(2, 2, Math.round(x), Math.round(y));
+          else if (Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) >= 4) p.push(Math.round(x), Math.round(y));
+        } else {
+          // La zone suit le stylet ; la page s'allonge si on la descend
+          const dx = x - selGesture.x, dy = y - selGesture.y;
+          moveStrokes(note.sel.strokes, dx, dy, false, note.sel.images);
+          note.sel.box = note.sel.box.map((v, i) => v + (i % 2 ? dy : dx));
+          selGesture.dx += dx; selGesture.dy += dy; selGesture.x = x; selGesture.y = y;
+          grow(note.sel.box[3]);
+        }
+        redraw();
+        return;
+      }
+      if (current?.pointer !== e.pointerId) return;
+      const s = current.s, coalesced = e.getCoalescedEvents?.(), events = coalesced?.length ? coalesced : [e];
+      const from = Math.max(0, s.pts.length / 3 - 2);
+      for (const ev of events) {
+        const [x, y] = toPage(ev), n = s.pts.length;
+        if (Math.hypot(x - s.pts[n - 3], y - s.pts[n - 2]) < 1.5) continue;
+        s.pts.push(Math.round(x), Math.round(y), pressure(ev));
+        s.y0 = Math.min(s.y0, y - s.s * 2); s.y1 = Math.max(s.y1, y + s.s * 2);
+        grow(y);
+      }
+      // Dessin immédiat de la fin du trait seulement (le surligneur est redessiné en entier)
+      if (s.a < 1) redraw();
+      else {
+        ctx.setTransform(note.dpr, 0, 0, note.dpr, 0, -note.top * note.dpr);
+        Ink.drawStroke(ctx, { ...s, pts: s.pts.slice(from * 3) }, note.k);
+      }
+    });
+
+    function endPointer(e) {
+      if (e.pointerType === 'pen') penDown = false;
+      const t = touches.get(e.pointerId);
+      touches.delete(e.pointerId);
+      if (t && !current && !erasing && (!note.finger || touches.size >= 1) && Math.abs(t.v) > 0.2) {
+        // Élan après un glissé du doigt
+        let v = t.v * 16;
+        const step = () => { window.scrollBy(0, -v); v *= 0.94; if (Math.abs(v) > 0.5) fling = requestAnimationFrame(step); };
+        fling = requestAnimationFrame(step);
+      }
+      if (selGesture?.pointer === e.pointerId) {
+        if (selGesture.kind === 'region') finishRegion();
+        else if (Math.abs(selGesture.dx) + Math.abs(selGesture.dy) > 0.5) {
+          moveStrokes(note.sel.strokes, 0, 0);
+          note.undo.push({ type: 'move', strokes: note.sel.strokes, images: note.sel.images, dx: selGesture.dx, dy: selGesture.dy });
+          note.redo = [];
+          inkChanged();
+        }
+        selGesture = null;
+        redraw(); renderTools();
+      }
+      if (erasing?.pointer === e.pointerId) {
+        if (erasing.removed.length) { note.undo.push({ type: 'remove', strokes: erasing.removed }); note.redo = []; inkChanged(); }
+        erasing = null; renderTools();
+      }
+      if (current?.pointer === e.pointerId) {
+        note.undo.push({ type: 'add', strokes: [{ s: current.s, i: note.doc.strokes.length - 1 }] });
+        note.redo = [];
+        current = null;
+        inkChanged(); redraw(); renderTools();
+      }
+    }
+    canvas.addEventListener('pointerup', endPointer);
+    canvas.addEventListener('pointercancel', endPointer);
+
+    function eraseAt(x, y) {
+      const hit = note.doc.strokes.filter(s => Ink.hits(s, x, y, 12));
+      if (!hit.length) return;
+      for (const s of hit) {
+        const i = note.doc.strokes.indexOf(s);
+        erasing.removed.unshift({ s, i });
+        note.doc.strokes.splice(i, 1);
+      }
+      redraw();
+    }
+
+    // Enregistrement sur l'appareil peu après chaque trait, envoi au dépôt quelques secondes après
+    function inkChanged() {
+      note.dirty = true;
+      $('#note-state').textContent = '…';
+      saveInk();
+    }
+    const saveInk = debounceAsync(async () => {
+      if (!note.id || !note.dirty) return;
+      note.dirty = false;
+      const id = note.id, now = nowIso();
+      const strokes = note.doc.strokes.map(({ c, s, a, pts }) => ({ c, s, a, pts }));
+      const body = Ink.encode({ h: note.doc.h, strokes, images: note.doc.images });
+      await idb.put({ id, body, body_at: now, pushed: false });
+      bodyCache.set(id, { body, body_at: now });
+      const t = find(id);
+      if (t) change(t, { format: 'ink', body_at: now }, 8000);
+      $('#note-state').textContent = `✓ ${fmtHour(now)}`;
+    }, 800);
+
+    async function leaveInk() {
+      if (!note.id) return;
+      await saveInk.flush();
+      note.id = null; note.doc = null;
+      syncSoon(500);
+    }
+    $('#note-back').addEventListener('click', () => history.back());
+    $('#tool-delete').addEventListener('click', () => { if (note.sel) removeSelection(); });
+
+    // ---------- Ajout d'une photo (stylet et clavier) ----------
+    let photoTarget = 'ink';
+    const photoMenu = open => { $('#photo-bg').hidden = $('#photo-menu').hidden = !open; };
+    $('#tool-photo').addEventListener('click', () => { photoTarget = 'ink'; photoMenu(true); });
+    $('#photo-bg').addEventListener('click', () => photoMenu(false));
+    $('#photo-cancel').addEventListener('click', () => photoMenu(false));
+
+    async function storePhoto(file) {
+      const { base64, width, height } = await Ink.preparePhoto(file);
+      const id = newId();
+      await idb.putPhoto({ id, data: base64 });
+      save(PHOTO_OUTBOX, [...load(PHOTO_OUTBOX, []), id]);
+      return { id, base64, width, height };
+    }
+
+    async function addInkPhoto(file) {
+      try {
+        const { id, width, height } = await storePhoto(file);
+        // Sous ce qui est déjà écrit si c'est visible à l'écran, sinon en haut de l'écran
+        const scale = Math.min(800 / width, 800 / height, 1), w = width * scale, h = height * scale;
+        const viewTop = pageOffset() / note.k, viewBottom = viewTop + note.viewH / note.k, bottom = usedBottom();
+        const y = Math.round((bottom > viewTop && bottom < viewBottom - 100 ? bottom : viewTop) + 30);
+        const img = { id, x: Math.round((Ink.W - w) / 2), y, w: Math.round(w), h: Math.round(h) };
+        note.doc.images.push(img);
+        while (note.doc.h - 500 < img.y + img.h) note.doc.h += 1000;
+        pageEl.style.height = `${note.doc.h * note.k}px`;
+        note.undo.push({ type: 'add', strokes: [], images: [{ img, i: note.doc.images.length - 1 }] });
+        note.redo = [];
+        // La photo arrive sélectionnée : on peut la faire glisser tout de suite
+        note.tool = 'select';
+        note.sel = { strokes: [], images: [img], box: selBox([], [img]) };
+        $('#note-tip').textContent = '';
+        inkChanged(); redraw(); renderTools();
+        toast('Photo ajoutée : faites-la glisser pour la placer, ✂️ pour la rogner');
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    for (const input of [$('#photo-camera'), $('#photo-pick')]) {
+      input.addEventListener('change', e => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        photoMenu(false);
+        if (!file) return;
+        if (photoTarget === 'ink' && note.id) addInkPhoto(file);
+        else if (photoTarget === 'text' && textDoc.id) addTextPhoto(file);
+      });
+    }
+
+    // ---------- Rognage ----------
+    // La photo entière s'affiche : on peut donc élargir ou annuler un rognage déjà fait.
+    // Le rectangle se règle au stylet, au doigt ou à la souris : coins et bords pour le redimensionner, intérieur pour le déplacer.
+    const CROP_MIN = 0.05, CROP_GRAB = 30;
+    const crop = { img: null, c: null, gesture: null };
+    const cropStage = $('#crop-stage');
+
+    function renderCropBox() {
+      const box = $('#crop-box').style, c = crop.c;
+      box.left = `${c.x * 100}%`; box.top = `${c.y * 100}%`; box.width = `${c.w * 100}%`; box.height = `${c.h * 100}%`;
+    }
+    function fitCropStage() {
+      if (!crop.img) return;
+      const el = $('#crop-img'), area = $('#crop-area').getBoundingClientRect();
+      const scale = Math.min((area.width - 48) / el.naturalWidth, (area.height - 48) / el.naturalHeight);
+      cropStage.style.width = `${el.naturalWidth * scale}px`;
+      cropStage.style.height = `${el.naturalHeight * scale}px`;
+    }
+    window.addEventListener('resize', fitCropStage);
+    function closeCrop() {
+      $('#crop').hidden = true;
+      crop.img = null; crop.gesture = null;
+    }
+
+    $('#tool-crop').addEventListener('click', () => {
+      const img = note.sel?.images?.[0], el = img && photoImage(img.id);
+      if (!el?.naturalWidth) { toast('Photo pas encore chargée (connexion nécessaire)'); return; }
+      const [x, y, w, h] = img.c || [0, 0, 1, 1];
+      crop.img = img;
+      crop.c = { x, y, w, h };
+      $('#crop-img').src = el.src;
+      $('#crop').hidden = false;
+      fitCropStage();
+      renderCropBox();
+      history.pushState({ screen }, '');
+    });
+
+    cropStage.addEventListener('pointerdown', e => {
+      if (crop.gesture) return;
+      const r = cropStage.getBoundingClientRect(), c = crop.c;
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const L = c.x * r.width, R = (c.x + c.w) * r.width, T = c.y * r.height, B = (c.y + c.h) * r.height;
+      const nearX = py > T - CROP_GRAB && py < B + CROP_GRAB, nearY = px > L - CROP_GRAB && px < R + CROP_GRAB;
+      // Le bord le plus proche l'emporte quand le rectangle est petit
+      const edgeX = !nearX ? '' : Math.abs(px - L) <= Math.abs(px - R) ? (Math.abs(px - L) < CROP_GRAB ? 'l' : '') : (Math.abs(px - R) < CROP_GRAB ? 'r' : '');
+      const edgeY = !nearY ? '' : Math.abs(py - T) <= Math.abs(py - B) ? (Math.abs(py - T) < CROP_GRAB ? 't' : '') : (Math.abs(py - B) < CROP_GRAB ? 'b' : '');
+      const inside = px > L && px < R && py > T && py < B;
+      if (!edgeX && !edgeY && !inside) return;
+      crop.gesture = { pointer: e.pointerId, edgeX, edgeY, sx: e.clientX, sy: e.clientY, start: { ...c }, W: r.width, H: r.height };
+      try { cropStage.setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
+    });
+    cropStage.addEventListener('pointermove', e => {
+      const g = crop.gesture;
+      if (g?.pointer !== e.pointerId) return;
+      const dx = (e.clientX - g.sx) / g.W, dy = (e.clientY - g.sy) / g.H, s = g.start;
+      const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+      let { x, y, w, h } = s;
+      if (!g.edgeX && !g.edgeY) {
+        x = clamp(s.x + dx, 0, 1 - s.w); y = clamp(s.y + dy, 0, 1 - s.h);
+      } else {
+        if (g.edgeX === 'l') { x = clamp(s.x + dx, 0, s.x + s.w - CROP_MIN); w = s.x + s.w - x; }
+        if (g.edgeX === 'r') w = clamp(s.w + dx, CROP_MIN, 1 - s.x);
+        if (g.edgeY === 't') { y = clamp(s.y + dy, 0, s.y + s.h - CROP_MIN); h = s.y + s.h - y; }
+        if (g.edgeY === 'b') h = clamp(s.h + dy, CROP_MIN, 1 - s.y);
+      }
+      crop.c = { x, y, w, h };
+      renderCropBox();
+    });
+    const endCropGesture = e => { if (crop.gesture?.pointer === e.pointerId) crop.gesture = null; };
+    cropStage.addEventListener('pointerup', endCropGesture);
+    cropStage.addEventListener('pointercancel', endCropGesture);
+
+    $('#crop-full').addEventListener('click', () => { crop.c = { x: 0, y: 0, w: 1, h: 1 }; renderCropBox(); });
+    $('#crop-cancel').addEventListener('click', () => history.back());
+    $('#crop-ok').addEventListener('click', () => {
+      const img = crop.img, c = crop.c;
+      const [ox, oy, ow, oh] = img.c || [0, 0, 1, 1];
+      if (Math.abs(c.x - ox) + Math.abs(c.y - oy) + Math.abs(c.w - ow) + Math.abs(c.h - oh) > 0.001) {
+        // La partie gardée reste à sa place dans la page et à la même échelle
+        const fullW = img.w / ow, fullH = img.h / oh;
+        const w = c.w * fullW, h = c.h * fullH;
+        const x = Math.max(0, Math.min(Ink.W - w, img.x + (c.x - ox) * fullW));
+        const y = Math.max(0, img.y + (c.y - oy) * fullH);
+        const whole = c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1;
+        const before = { x: img.x, y: img.y, w: img.w, h: img.h, c: img.c };
+        const after = { x, y, w, h, c: whole ? undefined : [c.x, c.y, c.w, c.h] };
+        Object.assign(img, after);
+        while (note.doc.h - 500 < img.y + img.h) note.doc.h += 1000;
+        pageEl.style.height = `${note.doc.h * note.k}px`;
+        note.undo.push({ type: 'crop', img, before, after });
+        note.redo = [];
+        note.sel.box = selBox([], [img]);
+        inkChanged(); redraw(); renderTools();
+      }
+      history.back();
+    });
+
+    // ---------- Contenu au clavier (texte mis en forme, photos) ----------
+    // Seules les balises et styles de mise en forme sont gardés ; les photos n'y gardent que leur identifiant.
+    const ALLOWED = new Set(['P', 'DIV', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'H2', 'H3', 'UL', 'OL', 'LI', 'SPAN', 'FONT', 'BLOCKQUOTE']);
+    const STYLES = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line'];
+    function sanitizeHtml(html) {
+      const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+      const clean = node => {
+        for (const child of [...node.childNodes]) {
+          if (child.nodeType === 3) continue;
+          if (child.nodeType !== 1) { child.remove(); continue; }
+          if (child.tagName === 'IMG') {
+            const id = child.getAttribute('data-photo');
+            if (!Ink.PHOTO_ID.test(id || '')) { child.remove(); continue; }
+            for (const a of [...child.attributes]) child.removeAttribute(a.name);
+            child.setAttribute('data-photo', id);
+            continue;
+          }
+          if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'SVG', 'TITLE', 'META'].includes(child.tagName)) { child.remove(); continue; }
+          clean(child);
+          if (!ALLOWED.has(child.tagName)) { child.replaceWith(...child.childNodes); continue; }
+          const style = STYLES.map(p => [p, child.style.getPropertyValue(p)]).filter(([, v]) => v && !/url\(/i.test(v));
+          const color = child.tagName === 'FONT' ? child.getAttribute('color') : null;
+          for (const a of [...child.attributes]) child.removeAttribute(a.name);
+          if (style.length) child.setAttribute('style', style.map(([p, v]) => `${p}: ${v}`).join('; '));
+          if (color && /^#?\w+$/.test(color)) child.setAttribute('color', color);
+        }
+      };
+      clean(doc.body);
+      return doc.body.innerHTML;
+    }
+
+    const textDoc = { id: null, dirty: false };
+    const tBody = $('#t-body');
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('defaultParagraphSeparator', false, 'p');
+
+    function openText(t, rec) {
+      textDoc.id = t.id; textDoc.dirty = false;
+      $('#t-title').textContent = t.title;
+      $('#t-state').textContent = '';
+      tBody.innerHTML = sanitizeHtml(rec?.body || '');
+      loadHtmlPhotos(tBody);
+      showScreen('text');
+      if (!tBody.textContent.trim()) tBody.focus();
+    }
+
+    const hasText = () => !!tBody.textContent.trim() || !!tBody.querySelector('img');
+    const saveText = debounceAsync(async () => {
+      if (!textDoc.id || !textDoc.dirty) return;
+      textDoc.dirty = false;
+      const id = textDoc.id, t = find(id);
+      if (!t || (!t.format && !hasText())) return; // rien écrit : pas de contenu créé
+      const now = nowIso(), body = sanitizeHtml(tBody.innerHTML);
+      await idb.put({ id, body, body_at: now, pushed: false });
+      bodyCache.set(id, { body, body_at: now });
+      change(t, { format: 'html', body_at: now }, 8000);
+      $('#t-state').textContent = `✓ Enregistré à ${fmtHour(now)}`;
+    }, 800);
+    function textChanged() {
+      textDoc.dirty = true;
+      $('#t-state').textContent = '…';
+      saveText();
+    }
+    async function leaveText() {
+      if (!textDoc.id) return;
+      await saveText.flush();
+      textDoc.id = null;
+      syncSoon(500);
+    }
+    tBody.addEventListener('input', textChanged);
+    tBody.addEventListener('paste', e => {
+      const html = e.clipboardData.getData('text/html');
+      if (!html) return;
+      e.preventDefault();
+      document.execCommand('insertHTML', false, sanitizeHtml(html));
+    });
+    // Les boutons ne prennent pas le focus : la sélection dans le texte est gardée
+    $('#t-tools').addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });
+    $('#t-tools').addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b || b.id === 't-photo') return;
+      tBody.focus();
+      if (b.dataset.cmd) document.execCommand(b.dataset.cmd, false, null);
+      else document.execCommand(b.dataset.color, false, b.dataset.value);
+      textChanged();
+    });
+    $('#t-back').addEventListener('click', () => history.back());
+
+    // Photo dans le texte : insérée à l'endroit du curseur
+    let textRange = null;
+    $('#t-photo').addEventListener('click', () => {
+      const sel = getSelection();
+      textRange = sel.rangeCount && tBody.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+      photoTarget = 'text';
+      if (ON_PC) $('#photo-pick').click(); else photoMenu(true);
+    });
+    async function addTextPhoto(file) {
+      try {
+        const { id, base64 } = await storePhoto(file);
+        tBody.focus();
+        if (textRange) { getSelection().removeAllRanges(); getSelection().addRange(textRange); }
+        document.execCommand('insertHTML', false, `<img data-photo="${id}" src="data:image/jpeg;base64,${base64}"><p><br></p>`);
+        textChanged();
+      } catch (e) {
+        toast(e.message);
+      }
+    }
 
     // ---------- Réglages (téléphone) ----------
     function openSetup() {
@@ -588,6 +1703,18 @@
     });
 
     // ---------- Démarrage ----------
+    // Ancienne description en texte simple : devient un contenu « au clavier »
+    async function migrateDescriptions() {
+      for (const t of items) {
+        if (t.deleted || !t.description || t.format) continue;
+        const now = nowIso(), body = `<p>${esc(t.description).replace(/\n/g, '<br>')}</p>`;
+        await idb.put({ id: t.id, body, body_at: now, pushed: false });
+        Object.assign(t, { format: 'html', body_at: now, description: '', updated_at: now });
+        dirty = true; rev++;
+      }
+      persist();
+    }
+
     if (ON_PC) {
       $('#back').href = '/';
       $('#back').textContent = '← Plateforme';
@@ -599,14 +1726,22 @@
 
     // Une autre fenêtre de la To do list sur le même appareil a modifié la liste
     window.addEventListener('storage', e => {
-      if (e.key === 'todo-items') { items = load('todo-items', []); render(); }
+      if (e.key === 'todo-items') { items = load('todo-items', []); if (screen === 'list') render(); }
     });
     window.addEventListener('online', () => sync({ quiet: true }));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync({ quiet: true }); });
-    setInterval(() => { if (!document.hidden) sync({ quiet: true }); }, 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Application quittée ou mise en arrière-plan : on enregistre et on envoie
+        Promise.all([saveInk.flush(), saveText.flush()]).then(() => sync({ quiet: true }));
+      } else if (screen === 'list') sync({ quiet: true });
+    });
+    setInterval(() => { if (!document.hidden && screen === 'list') sync({ quiet: true }); }, 60 * 1000);
 
-    render();
-    if (!ready()) openSetup(); else sync({ quiet: true });
+    history.replaceState({ screen: 'list' }, '');
+    migrateDescriptions().finally(() => {
+      render();
+      if (!ready()) openSetup(); else sync({ quiet: true });
+    });
   </script>
 </body>
 </html>

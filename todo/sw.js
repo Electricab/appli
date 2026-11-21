@@ -1,7 +1,7 @@
 // Met l'interface en cache pour qu'elle s'ouvre même sans réseau.
 // Les données (API GitHub) ne passent jamais par ce cache : elles sont gérées par la page.
-const CACHE = 'todo-v1';
-const FILES = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'todo-v2';
+const FILES = ['./', 'index.html', 'ink.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)));
