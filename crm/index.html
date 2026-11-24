@@ -189,6 +189,13 @@
     .st-chip[data-s="refuse"], .st.refuse, .st-seg [data-s="refuse"] { --c: #b91c1c; --b: #fee2e2; }
     .st-filters { flex-wrap: wrap; }
     .st-chip.active { color: var(--c); background: var(--b); border-color: var(--c); font-weight: 600; }
+    .pick-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pick-options button { font: inherit; font-weight: 600; padding: 14px 8px; border-radius: 12px; border: 1px solid var(--c, var(--border)); background: var(--b, var(--surface)); color: var(--c, var(--text)); }
+    .pick-options button.current { outline: 3px solid var(--c, var(--accent)); outline-offset: 1px; }
+    .pick-options button[data-v="prospect"] { --c: var(--warn); --b: var(--warn-bg); }
+    .pick-options button[data-v="client"] { --c: var(--ok); --b: var(--ok-bg); }
+    .pickable { padding: 2px 8px !important; }
+    .pickable::after { content: " ▾"; font-size: 0.65rem; opacity: .7; }
     .st { display: inline-block; font-size: 0.72rem; font-weight: 600; color: var(--c); background: var(--b); border-radius: 8px; padding: 0 6px; margin: 2px 3px 0 0; }
     .st-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 0 12px; }
     .st-seg button { font: inherit; font-size: 0.78rem; padding: 9px 2px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
@@ -461,6 +468,15 @@
       <button type="button" class="btn secondary" id="crop-full">Photo entière</button>
       <button type="button" class="btn" id="crop-ok">Valider</button>
     </div>
+  </div>
+
+  <!-- ===== Choix rapide : statut d'une affaire, catégorie d'un client ===== -->
+  <div class="photo-bg" id="pick-bg" hidden></div>
+  <div class="photo-menu pick-sheet" id="pick-sheet" hidden>
+    <strong id="pick-title"></strong>
+    <div class="pick-options" id="pick-options"></div>
+    <button type="button" class="btn secondary" id="pick-extra" hidden></button>
+    <button type="button" class="btn secondary" id="pick-cancel">Annuler</button>
   </div>
 
   <div class="toast" id="toast" hidden></div>
@@ -806,9 +822,9 @@
             <div class="title">${esc(c.nom)}</div>
             <div class="muted">${esc(c.code)}${c.data.devis_ville ? ' · ' + esc(c.data.devis_ville) : ''}</div>
             <div>${liveAffaires(c.id).filter(a => !statutFilter.size || statutFilter.has(statutOf(a)))
-              .map(a => `<span class="st ${statutOf(a)}">${esc(a.nom)}</span>`).join('')}</div>
+              .map(a => `<span class="st pickable ${statutOf(a)}" data-aff="${esc(a.id)}">${esc(a.nom)}</span>`).join('')}</div>
           </div>
-          <span class="badge ${esc(c.data.categorie)}">${CATEGORIES[c.data.categorie] || ''}</span>
+          <span class="badge pickable ${esc(c.data.categorie)}" data-cat-client="${esc(c.id)}">${CATEGORIES[c.data.categorie] || ''}</span>
         </li>`).join('');
       renderStatutFilter();
       $('#clients').hidden = !found.length;
@@ -841,6 +857,7 @@
       renderList();
     });
     $('#clients').addEventListener('click', e => {
+      if (quickPick(e)) return; // appui sur un statut ou une catégorie : choix rapide
       const li = e.target.closest('li[data-id]');
       if (li) show('client', { clientId: li.dataset.id });
     });
@@ -860,7 +877,7 @@
       const addr = [d.devis_adr1, d.devis_adr2, [d.devis_cp, d.devis_ville].filter(Boolean).join(' ')].filter(Boolean);
       const phone = d.mobile1 || d.tel || d.mobile2;
       $('#c-card').innerHTML = `
-        <div class="info-line"><span class="badge ${esc(d.categorie)}">${CATEGORIES[d.categorie] || ''}</span>
+        <div class="info-line"><span class="badge pickable ${esc(d.categorie)}" data-cat-client="${esc(c.id)}">${CATEGORIES[d.categorie] || ''}</span>
           <span class="muted" style="font-family:monospace">${esc(c.code)}</span> ${d.prefixe ? `<span class="muted">· ${esc(d.prefixe)}</span>` : ''}</div>
         ${addr.length ? `<div class="info-line">${addr.map(esc).join('<br>')}</div>` : ''}
         ${d.email ? `<div class="info-line muted">${esc(d.email)}</div>` : ''}
@@ -875,7 +892,7 @@
         return `<li class="tap" data-aff="${esc(a.id)}">
           <span class="aff-ico">📁</span>
           <div class="grow">
-            <div class="title">${esc(a.nom)} <span class="st ${statutOf(a)}">${AFFAIRE_STATUTS[statutOf(a)]}</span></div>
+            <div class="title">${esc(a.nom)} <span class="st pickable ${statutOf(a)}" data-aff="${esc(a.id)}">${AFFAIRE_STATUTS[statutOf(a)]}</span></div>
             <div class="muted">${a.docs.length} note(s)${open ? ` · <strong>${open} à traiter</strong>` : ''}${a.docs[0] ? ` · ${esc(fmtDay(a.docs[0].visit_date))}` : ''}</div>
           </div>
         </li>`;
@@ -910,16 +927,70 @@
       renderDocList($('#a-docs'), $('#a-docs-empty'), docs, false);
     }
 
-    $('#a-statut').addEventListener('click', e => {
-      const st = e.target.closest('button')?.dataset.s;
-      const a = getAffaire(state.affaireId);
+    function setAffaireStatut(id, st) {
+      const a = getAffaire(id);
       if (!st || !a || st === statutOf(a)) return;
       cache.affaires = cache.affaires.map(x => x.id === a.id ? { ...x, statut: st, updated_at: nowIso() } : x);
       save(CACHE_KEY, cache);
       syncSoon(500);
-      renderAffaire();
-      toast(`Affaire : ${AFFAIRE_STATUTS[st]}`);
+      refresh();
+      toast(`« ${a.nom} » : ${AFFAIRE_STATUTS[st]}`);
+    }
+    $('#a-statut').addEventListener('click', e => setAffaireStatut(state.affaireId, e.target.closest('button')?.dataset.s));
+
+    function setCategorie(clientId, categorie) {
+      const c = getClient(clientId);
+      if (!c || c.data.categorie === categorie) return;
+      cache.clients = cache.clients.map(x => x.id === c.id ? { ...x, data: { ...x.data, categorie }, updated_at: nowIso() } : x);
+      save(CACHE_KEY, cache);
+      syncSoon(500);
+      refresh();
+      toast(`${c.nom} : ${CATEGORIES[categorie]}`);
+    }
+
+    // ---------- Choix rapide : appui sur un statut d'affaire ou une catégorie de client ----------
+    let pick = null; // { onPick, extra }
+    const closePick = () => { $('#pick-bg').hidden = $('#pick-sheet').hidden = true; pick = null; };
+    function openPick(title, options, current, onPick, extra) {
+      pick = { onPick, extra };
+      $('#pick-title').textContent = title;
+      $('#pick-options').innerHTML = options.map(o =>
+        `<button type="button" class="${o.cls || ''}${o.v === current ? ' current' : ''}" data-v="${esc(o.v)}" data-s="${esc(o.v)}">${esc(o.label)}${o.v === current ? ' ✓' : ''}</button>`).join('');
+      $('#pick-extra').hidden = !extra;
+      if (extra) $('#pick-extra').textContent = extra.label;
+      $('#pick-bg').hidden = $('#pick-sheet').hidden = false;
+    }
+    $('#pick-bg').addEventListener('click', closePick);
+    $('#pick-cancel').addEventListener('click', closePick);
+    $('#pick-options').addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b || !pick) return;
+      const { onPick } = pick;
+      closePick();
+      onPick(b.dataset.v);
     });
+    $('#pick-extra').addEventListener('click', () => { const { extra } = pick; closePick(); extra.action(); });
+
+    // Renvoie true si l'appui était sur un badge (l'écran n'est alors pas changé)
+    function quickPick(e) {
+      const st = e.target.closest('.st[data-aff]'), cat = e.target.closest('[data-cat-client]');
+      if (!st && !cat) return false;
+      e.stopPropagation();
+      if (st) {
+        const a = getAffaire(st.dataset.aff);
+        if (!a) return true;
+        openPick(`Statut de « ${a.nom} »`,
+          Object.entries(AFFAIRE_STATUTS).map(([v, label]) => ({ v, label, cls: 'st-chip' })),
+          statutOf(a), v => setAffaireStatut(a.id, v),
+          { label: 'Ouvrir l\'affaire →', action: () => show('affaire', { affaireId: a.id, clientId: a.client_id }) });
+      } else {
+        const c = getClient(cat.dataset.catClient);
+        if (!c) return true;
+        openPick(`Catégorie de « ${c.nom} »`, Object.entries(CATEGORIES).map(([v, label]) => ({ v, label })),
+          c.data.categorie, v => setCategorie(c.id, v));
+      }
+      return true;
+    }
 
     function newAffaire(clientId, nom) {
       const now = nowIso();
@@ -929,7 +1000,9 @@
       return a;
     }
 
+    $('#c-card').addEventListener('click', e => quickPick(e));
     $('#affs').addEventListener('click', e => {
+      if (quickPick(e)) return;
       const li = e.target.closest('li[data-aff]');
       if (li) show('affaire', { affaireId: li.dataset.aff });
     });
